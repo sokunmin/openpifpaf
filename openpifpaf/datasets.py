@@ -4,7 +4,7 @@ import os
 import torch.utils.data
 from PIL import Image
 
-from . import transforms, utils
+from openpifpaf import transforms, utils
 
 
 ANNOTATIONS_TRAIN = 'data-mscoco/annotations/person_keypoints_train2017.json'
@@ -49,25 +49,26 @@ class CocoKeypoints(torch.utils.data.Dataset):
                  n_images=None, preprocess=None, all_images=False, all_persons=False):
         from pycocotools.coco import COCO
         self.root = root
+        print('> loading', annFile, ' ...')
         self.coco = COCO(annFile)
-
         self.cat_ids = self.coco.getCatIds(catNms=['person'])
-        if all_images:
+        if all_images: # <- test
             self.ids = self.coco.getImgIds()
         elif all_persons:
             self.ids = self.coco.getImgIds(catIds=self.cat_ids)
-        else:
+        else:  # <- train
             self.ids = self.coco.getImgIds(catIds=self.cat_ids)
+            print('> [BEFORE] Images: {}'.format(len(self.ids)))
             self.filter_for_keypoint_annotations()
         if n_images:
             self.ids = self.ids[:n_images]
-        print('Images: {}'.format(len(self.ids)))
-
+        print('> [AFTER] Images: {}'.format(len(self.ids)))
+        # preprocess: train or eval
         self.preprocess = preprocess or transforms.EVAL_TRANSFORM
         self.target_transforms = target_transforms
 
     def filter_for_keypoint_annotations(self):
-        print('filter for keypoint annotations ...')
+        print('> filter for keypoint annotations ...')
         def has_keypoint_annotation(image_id):
             ann_ids = self.coco.getAnnIds(imgIds=image_id, catIds=self.cat_ids)
             anns = self.coco.loadAnns(ann_ids)
@@ -79,7 +80,7 @@ class CocoKeypoints(torch.utils.data.Dataset):
             return False
 
         self.ids = [image_id for image_id in self.ids
-                    if has_keypoint_annotation(image_id)]
+                    if has_keypoint_annotation(image_id)]  # extract keypoint anno only
         print('... done.')
 
     def __getitem__(self, index):
@@ -205,7 +206,7 @@ def train_factory(args, preprocess, target_transforms):
         annFile=args.train_annotations,
         preprocess=preprocess,
         target_transforms=target_transforms,
-        n_images=args.n_images,
+        n_images=args.n_images,  # None
     )
     if args.duplicate_data:
         train_data = torch.utils.data.ConcatDataset(
@@ -220,7 +221,7 @@ def train_factory(args, preprocess, target_transforms):
         annFile=args.val_annotations,
         preprocess=preprocess,
         target_transforms=target_transforms,
-        n_images=args.n_images,
+        n_images=args.n_images,  # > None
     )
     if args.duplicate_data:
         val_data = torch.utils.data.ConcatDataset(
@@ -228,14 +229,14 @@ def train_factory(args, preprocess, target_transforms):
     val_loader = torch.utils.data.DataLoader(
         val_data, batch_size=args.batch_size, shuffle=False,
         pin_memory=args.pin_memory, num_workers=args.loader_workers, drop_last=True,
-        collate_fn=collate_images_targets_meta)
-
+        collate_fn=collate_images_targets_meta)  # TOCHECK
+    # TOCHECK: `args.pre_n_images` and why use pretrain loader?
     pre_train_data = CocoKeypoints(
         root=args.train_image_dir,
         annFile=args.train_annotations,
         preprocess=preprocess,
         target_transforms=target_transforms,
-        n_images=args.pre_n_images,
+        n_images=args.pre_n_images,  # > 8000
     )
     if args.pre_duplicate_data:
         pre_train_data = torch.utils.data.ConcatDataset(
@@ -243,6 +244,6 @@ def train_factory(args, preprocess, target_transforms):
     pre_train_loader = torch.utils.data.DataLoader(
         pre_train_data, batch_size=args.batch_size, shuffle=True,
         pin_memory=args.pin_memory, num_workers=args.loader_workers, drop_last=True,
-        collate_fn=collate_images_targets_meta)
+        collate_fn=collate_images_targets_meta)  # TOCHECK
 
     return train_loader, val_loader, pre_train_loader

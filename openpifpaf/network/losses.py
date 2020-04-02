@@ -3,6 +3,14 @@
 import logging
 import torch
 
+from ..data import (
+    COCO_PERSON_SIGMAS,
+    COCO_PERSON_SKELETON,
+    DENSER_COCO_PERSON_CONNECTIONS,
+    DENSER_COCO_PERSON_SKELETON,
+    KINEMATIC_TREE_SKELETON,
+)
+
 LOG = logging.getLogger(__name__)
 
 
@@ -16,9 +24,9 @@ def laplace_loss(x1, x2, logb, t1, t2, weight=None):
     # left derivative of sqrt at zero is not defined, so prefer torch.norm():
     # https://github.com/pytorch/pytorch/issues/2421
     # norm = torch.sqrt((x1 - t1)**2 + (x2 - t2)**2)
-    norm = (torch.stack((x1, x2)) - torch.stack((t1, t2))).norm(dim=0)
-
-    losses = 0.694 + logb + norm * torch.exp(-logb)
+    norm = (torch.stack((x1, x2)) - torch.stack((t1, t2))).norm(dim=0) # (#pos,)
+    # TOCHECK: (1) why set 0.694? (2) +log, not *log?
+    losses = 0.694 + logb + norm * torch.exp(-logb)  # > torch.exp(-logb) == 1 / b
     if weight is not None:
         losses = losses * weight
     return torch.sum(losses)
@@ -121,9 +129,9 @@ class MultiHeadLoss(torch.nn.Module):
     def __init__(self, losses, lambdas):
         super(MultiHeadLoss, self).__init__()
 
-        self.losses = torch.nn.ModuleList(losses)
-        self.lambdas = lambdas
-
+        self.losses = torch.nn.ModuleList(losses)  # PIF loss, PAF loss
+        self.lambdas = lambdas  # > [30.0, 2.0, 2.0, 50.0, 3.0, 3.0]
+        # > field_names = ['pif.c', 'pif.vec1', 'pif.scales1', 'paf.c', 'paf.vec1', 'paf.vec2']
         self.field_names = [n for l in self.losses for n in l.field_names]
         LOG.info('multihead loss: %s, %s', self.field_names, self.lambdas)
 
@@ -131,7 +139,7 @@ class MultiHeadLoss(torch.nn.Module):
         assert len(self.losses) == len(head_fields)
         assert len(self.losses) <= len(head_targets)
         flat_head_losses = [ll
-                            for l, f, t in zip(self.losses, head_fields, head_targets)
+                            for l, f, t in zip(self.losses, head_fields, head_targets) # > [pif, paf]
                             for ll in l(f, t)]
 
         assert len(self.lambdas) == len(flat_head_losses)
@@ -143,75 +151,37 @@ class MultiHeadLoss(torch.nn.Module):
         return total_loss, flat_head_losses
 
 
-class MultiHeadLossAutoTune(torch.nn.Module):
-    def __init__(self, losses, lambdas):
-        """Auto-tuning multi-head less.
-
-        Uses idea from "Multi-Task Learning Using Uncertainty to Weigh Losses
-        for Scene Geometry and Semantics" by Kendall, Gal and Cipolla.
-
-        In the common setting, use lambdas of zero and one to deactivate and
-        activate the tasks you want to train. Less common, if you have
-        secondary tasks, you can reduce their importance by choosing a
-        lambda value between zero and one.
-        """
-        super().__init__()
-        assert all(l >= 0.0 for l in lambdas)
-
-        self.losses = torch.nn.ModuleList(losses)
-        self.lambdas = lambdas
-        self.log_sigmas = torch.nn.Parameter(
-            torch.zeros((len(lambdas),), dtype=torch.float32),
-            requires_grad=True,
-        )
-
-        self.field_names = [n for l in self.losses for n in l.field_names]
-        LOG.info('multihead loss with autotune: %s', self.field_names)
-
-    def batch_meta(self):
-        return {'mtl_sigmas': [round(float(s), 3) for s in self.log_sigmas.exp()]}
-
-    def forward(self, *args):
-        head_fields, head_targets = args
-        assert len(self.losses) == len(head_fields)
-        assert len(self.losses) <= len(head_targets)
-        flat_head_losses = [ll
-                            for l, f, t in zip(self.losses, head_fields, head_targets)
-                            for ll in l(f, t)]
-
-        assert len(self.log_sigmas) == len(flat_head_losses)
-        loss_values = [lam * l / (2.0 * (log_sigma.exp() ** 2))
-                       for lam, log_sigma, l in zip(self.lambdas, self.log_sigmas, flat_head_losses)
-                       if l is not None]
-        auto_reg = [lam * log_sigma
-                    for lam, log_sigma, l in zip(self.lambdas, self.log_sigmas, flat_head_losses)
-                    if l is not None]
-        total_loss = sum(loss_values) + sum(auto_reg) if loss_values else None
-
-        return total_loss, flat_head_losses
-
-
 class CompositeLoss(torch.nn.Module):
     background_weight = 1.0
     multiplicity_correction = False
     independence_scale = 3.0
 
     def __init__(self, head_name, regression_loss, *,
-                 n_vectors, n_scales, margin=False):
+                 n_vectors, n_scales, sigmas=None, margin=False):
         super(CompositeLoss, self).__init__()
-
-        LOG.debug('%s: n_vectors = %d, n_scales = %d, margin = %s',
-                  head_name, n_vectors, n_scales, margin)
 
         self.n_vectors = n_vectors
         self.n_scales = n_scales
+        if self.n_scales:  # <-
+            assert len(sigmas) == n_scales
+        if sigmas is None:
+            sigmas = [[1.0] for _ in range(n_vectors)]
+        if sigmas is not None:  # <-
+            assert len(sigmas) == n_vectors
+            scales_to_kp = torch.tensor(sigmas)  # PIF: (1,17), PAF: (2,19)
+            scales_to_kp = torch.unsqueeze(scales_to_kp, 0)
+            scales_to_kp = torch.unsqueeze(scales_to_kp, -1)
+            scales_to_kp = torch.unsqueeze(scales_to_kp, -1)  # PIF: (1,1,17,1,1), PAF: (1,2,19,1,1)
+            self.register_buffer('scales_to_kp', scales_to_kp)  # SEE: https://zhuanlan.zhihu.com/p/89442276
+        else:
+            self.scales_to_kp = None
 
         self.regression_loss = regression_loss or laplace_loss
         self.field_names = (
             ['{}.c'.format(head_name)] +
             ['{}.vec{}'.format(head_name, i + 1) for i in range(self.n_vectors)] +
             ['{}.scales{}'.format(head_name, i + 1) for i in range(self.n_scales)]
-        )
+        )  # PIF: [pif.c, pif.vec1, pif.scales1], PAF: [paf.c, paf.vec1, paf.vec2]
         self.margin = margin
         if self.margin:
             self.field_names += ['{}.margin{}'.format(head_name, i + 1)
@@ -219,43 +189,41 @@ class CompositeLoss(torch.nn.Module):
 
         self.bce_blackout = None
 
+        LOG.debug('%s: n_vectors = %d, n_scales = %d, len(sigmas) = %d, margin = %s',
+                  head_name, n_vectors, n_scales, len(sigmas), margin)
+
     def forward(self, *args):  # pylint: disable=too-many-statements
-        LOG.debug('loss for %s', self.field_names)
-
         x, t = args
-
+        # > `n_vectors`: PIF=1, PAF= ; `n_scales`: PIF=1, PAF=
         assert len(x) == 1 + 2 * self.n_vectors + self.n_scales
-        x_intensity = x[0]
-        x_regs = x[1:1 + self.n_vectors]
-        x_spreads = x[1 + self.n_vectors:1 + 2 * self.n_vectors]
+        x_intensity = x[0]  # > [0] cls: (#obj, 17, up_H, up_W)
+        x_regs = x[1:1 + self.n_vectors]  # >[1] reg: (#obj, 17, 2, up_H, up_W)
+        x_spreads = x[1 + self.n_vectors:1 + 2 * self.n_vectors]  # >[2] spread: (#obj, 17, up_H, up_W)
         x_scales = []
-        if self.n_scales:
-            x_scales = x[1 + 2 * self.n_vectors:1 + 2 * self.n_vectors + self.n_scales]
+        if self.n_scales:  # <- pif
+            x_scales = x[1 + 2 * self.n_vectors:1 + 2 * self.n_vectors + self.n_scales] # >[3] scales: (#obj, 17, up_H, up_W)
 
-        if self.n_scales == 0:
-            t = t[:-self.n_vectors]  # assume there are as many scales as vectors and remove them
-        assert len(t) == 1 + self.n_vectors + self.n_scales
-        target_intensity = t[0]
-        target_regs = t[1:1 + self.n_vectors]
-        target_scales = t[1 + self.n_vectors:]
-
-        bce_masks = (target_intensity[:, :-1] + target_intensity[:, -1:]) > 0.5
+        assert len(t) == 1 + self.n_vectors + 1
+        target_intensity = t[0]  # >(#obj, 18/20, up_H, up_W)
+        target_regs = t[1:1 + self.n_vectors]  # >(#obj, 17/19, 6, up_H, up_W)
+        target_scale = t[-1]  # >(#obj, 17/19, up_H, up_W)
+        # TOCHECK: `bce_masks` = (#obj, 17, H, W) + (#obj, 1, H, W), how target_mask is generated
+        bce_masks = (target_intensity[:, :-1] + target_intensity[:, -1:]) > 0.5  # >(#obj, 17/19, up_h, up_W)
         if not torch.any(bce_masks):
             return None, None, None
-
-        batch_size = x_intensity.shape[0]
+        # This should be #obj
+        batch_size = x_intensity.shape[0]  # (#obj, 17/19, up_H, up_W) -> #obj
         LOG.debug('batch size = %d', batch_size)
 
-        bce_x_intensity = x_intensity
-        bce_target_intensity = target_intensity[:, :-1]
-        if self.bce_blackout:
+        bce_x_intensity = x_intensity  # > `pred`: (#obj, 17/19, up_H, up_W)
+        bce_target_intensity = target_intensity[:, :-1]  # > `gt`: (#obj, 17/19, up_H, up_W)
+        if self.bce_blackout:  # TOCHECK: how does this work?
             bce_x_intensity = bce_x_intensity[:, self.bce_blackout]
             bce_masks = bce_masks[:, self.bce_blackout]
             bce_target_intensity = bce_target_intensity[:, self.bce_blackout]
 
-        LOG.debug('BCE: x = %s, target = %s, mask = %s',
-                  x_intensity.shape, bce_target_intensity.shape, bce_masks.shape)
-        bce_target = torch.masked_select(bce_target_intensity, bce_masks)
+        LOG.debug('BCE: target = %s, mask = %s', bce_target_intensity.shape, bce_masks.shape)
+        bce_target = torch.masked_select(bce_target_intensity, bce_masks)  # >(#obj, 17/19, up_h, up_W)
         bce_weight = None
         if self.background_weight != 1.0:
             bce_weight = torch.ones_like(bce_target)
@@ -270,43 +238,43 @@ class CompositeLoss(torch.nn.Module):
         reg_masks = target_intensity[:, :-1] > 0.5
         if torch.any(reg_masks):
             weight = None
-            if self.multiplicity_correction:
+            if self.multiplicity_correction:  # TOCHECK: how does this work?
                 assert len(target_regs) == 2
                 lengths = torch.norm(target_regs[0] - target_regs[1], dim=2)
                 multiplicity = (lengths - 3.0) / self.independence_scale
                 multiplicity = torch.clamp(multiplicity, min=1.0)
                 multiplicity = torch.masked_select(multiplicity, reg_masks)
                 weight = 1.0 / multiplicity
-
+            # `x_reg`: (#obj, 17/19, 2, up_H, up_W), `x_spread`: (#obj, 17/19, up_H, up_W), `target_reg`: (#obj, 17/19, 6, up_H, up_W)
             reg_losses = []
-            for i, (x_reg, x_spread, target_reg) in enumerate(zip(x_regs, x_spreads, target_regs)):
+            for i, (x_reg, x_spread, target_reg) in enumerate(zip(x_regs, x_spreads, target_regs)):  # > PIF:1, PAF:2
                 if hasattr(self.regression_loss, 'scale'):
                     assert self.scales_to_kp is not None
                     self.regression_loss.scale = torch.masked_select(
-                        torch.clamp(target_scales[i], 0.1, 1000.0),  # pylint: disable=unsubscriptable-object
+                        torch.clamp(target_scale * self.scales_to_kp[i], 0.1, 1000.0),  # pylint: disable=unsubscriptable-object
                         reg_masks,
                     )
-
-                reg_losses.append(self.regression_loss(
-                    torch.masked_select(x_reg[:, :, 0], reg_masks),
-                    torch.masked_select(x_reg[:, :, 1], reg_masks),
-                    torch.masked_select(x_spread, reg_masks),
-                    torch.masked_select(target_reg[:, :, 0], reg_masks),
-                    torch.masked_select(target_reg[:, :, 1], reg_masks),
-                    weight=(weight if weight is not None else 1.0) * 0.1,
-                ) / 100.0 / batch_size)
+                # > `laplace loss` is used here.
+                reg_losses.append(self.regression_loss(  # `reg_masks`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(x_reg[:, :, 0], reg_masks),  # `x_reg[...,0]`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(x_reg[:, :, 1], reg_masks),  # `x_reg[...,1]`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(x_spread, reg_masks),  # `x_spread`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(target_reg[:, :, 0], reg_masks),  # `target_reg[...,0]`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(target_reg[:, :, 1], reg_masks),  # `target_reg[...,1]`: (#obj, 17/19, up_H, up_W)
+                    weight=weight,
+                ) / 1000.0 / batch_size)
 
         scale_losses = []
         if x_scales:
             scale_losses = [
-                torch.nn.functional.l1_loss(
-                    torch.masked_select(x_scale, torch.isnan(target_scale) == 0),
-                    torch.masked_select(target_scale, torch.isnan(target_scale) == 0),
-                    reduction='sum',
+                torch.nn.functional.l1_loss(  # `reg_masks`: (#obj, 17, up_H, up_W)
+                    torch.masked_select(x_scale, reg_masks),  # `x_scale`: (#obj, 17, up_H, up_W)
+                    torch.masked_select(target_scale * scale_to_kp, reg_masks),  # `target_scale`:(#obj, 17, up_H, up_W)
+                    reduction='sum',  # `scale_to_kp`: (1,17,1,1)
                 ) / 1000.0 / batch_size
-                for x_scale, target_scale in zip(x_scales, target_scales)
+                for x_scale, scale_to_kp in zip(x_scales, self.scales_to_kp)  # `scales_to_kp`: (1,1,17,1,1)
             ]
-
+        # TOCHECK: when to use `margin_loss`?
         margin_losses = [None for _ in target_regs] if self.margin else []
         if self.margin and torch.any(reg_masks):
             margin_losses = []
@@ -344,8 +312,6 @@ def cli(parser):
                        help='[experimental] linear length scale of independence for PAF regression')
     group.add_argument('--margin-loss', default=False, action='store_true',
                        help='[experimental]')
-    group.add_argument('--auto-tune-mtl', default=False, action='store_true',
-                       help='[experimental]')
 
 
 def factory_from_args(args):
@@ -355,13 +321,12 @@ def factory_from_args(args):
     CompositeLoss.aspect_ratio = args.paf_aspect_ratio
 
     return factory(
-        args.headnets,
-        args.lambdas,
-        reg_loss_name=args.regression_loss,
-        r_smooth=args.r_smooth,
+        args.headnets,  # > [pif, paf]
+        args.lambdas,  # > [30.0, 2.0, 2.0, 50.0, 3.0, 3.0]
+        reg_loss_name=args.regression_loss,  # > laplace
+        r_smooth=args.r_smooth,  # > 0.0
         device=args.device,
-        margin=args.margin_loss,
-        auto_tune_mtl=args.auto_tune_mtl,
+        margin=args.margin_loss,  # > false
     )
 
 
@@ -375,20 +340,42 @@ def loss_parameters(head_name):
     n_scales = None
     if 'pif' in head_name:
         n_scales = 1
-    elif 'pafs' in head_name:
-        n_scales = 2
     elif 'paf' in head_name:
         n_scales = 0
 
+    sigmas = None
+    if head_name == 'pif':
+        sigmas = [COCO_PERSON_SIGMAS]
+    elif head_name in ('paf', 'paf19', 'wpaf'):  # > TOCHECK
+        sigmas = [  # TOCHECK: why use this way in PAF?
+            [COCO_PERSON_SIGMAS[j1i - 1] for j1i, _ in COCO_PERSON_SKELETON],
+            [COCO_PERSON_SIGMAS[j2i - 1] for _, j2i in COCO_PERSON_SKELETON],
+        ]
+    elif head_name in ('paf16',):
+        sigmas = [
+            [COCO_PERSON_SIGMAS[j1i - 1] for j1i, _ in KINEMATIC_TREE_SKELETON],
+            [COCO_PERSON_SIGMAS[j2i - 1] for _, j2i in KINEMATIC_TREE_SKELETON],
+        ]
+    elif head_name in ('paf44',):
+        sigmas = [
+            [COCO_PERSON_SIGMAS[j1i - 1] for j1i, _ in DENSER_COCO_PERSON_SKELETON],
+            [COCO_PERSON_SIGMAS[j2i - 1] for _, j2i in DENSER_COCO_PERSON_SKELETON],
+        ]
+    elif head_name in ('paf25',):  # > deprecated
+        sigmas = [
+            [COCO_PERSON_SIGMAS[j1i - 1] for j1i, _ in DENSER_COCO_PERSON_CONNECTIONS],
+            [COCO_PERSON_SIGMAS[j2i - 1] for _, j2i in DENSER_COCO_PERSON_CONNECTIONS],
+        ]
+
     return {
-        'n_vectors': n_vectors,
-        'n_scales': n_scales,
+        'n_vectors': n_vectors,  # PIF:1, PAF:2
+        'n_scales': n_scales,  # PIF:1, PAF:0
+        'sigmas': sigmas,
     }
 
 
 def factory(head_names, lambdas, *,
-            reg_loss_name=None, r_smooth=None, device=None, margin=False,
-            auto_tune_mtl=False):
+            reg_loss_name=None, r_smooth=None, device=None, margin=False):
     if isinstance(head_names[0], (list, tuple)):
         return [factory(hn, lam,
                         reg_loss_name=reg_loss_name,
@@ -403,7 +390,7 @@ def factory(head_names, lambdas, *,
         reg_loss = SmoothL1Loss(r_smooth)
     elif reg_loss_name == 'l1':
         reg_loss = l1_loss
-    elif reg_loss_name == 'laplace':
+    elif reg_loss_name == 'laplace':  # <-
         reg_loss = laplace_loss
     elif reg_loss_name is None:
         reg_loss = laplace_loss
@@ -413,10 +400,7 @@ def factory(head_names, lambdas, *,
     losses = [CompositeLoss(head_name, reg_loss,
                             margin=margin, **loss_parameters(head_name))
               for head_name in head_names]
-    if auto_tune_mtl:
-        loss = MultiHeadLossAutoTune(losses, lambdas)
-    else:
-        loss = MultiHeadLoss(losses, lambdas)
+    loss = MultiHeadLoss(losses, lambdas)
 
     if device is not None:
         loss = loss.to(device)

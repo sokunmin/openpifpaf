@@ -5,11 +5,11 @@ import time
 
 import numpy as np
 
-from . import generator
-from .paf_scored import PafScored
-from .pif_hr import PifHr
-from .pif_seeds import PifSeeds
-from .utils import normalize_pif, normalize_paf
+from openpifpaf.decoder import generator
+from openpifpaf.decoder.paf_scored import PafScored
+from openpifpaf.decoder.pif_hr import PifHr
+from openpifpaf.decoder.pif_seeds import PifSeeds
+from openpifpaf.decoder.utils import normalize_pif, normalize_paf
 
 LOG = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class PifPafDijkstra(object):
                  paf_min_distance=0.0,
                  paf_max_distance=None,
                  seed_threshold=0.2,
-                 confidence_scales=None,
+                 confidence_scales=None,  # ADDED
                  debug_visualizer=None):
         self.strides = stride
         self.pif_indices = pif_index
@@ -61,7 +61,7 @@ class PifPafDijkstra(object):
 
         self.pif_nn = 16
         self.paf_nn = 1 if self.connection_method == 'max' else 35
-
+        # ADDED
         self.confidence_scales = confidence_scales
 
     def __call__(self, fields, initial_annotations=None):
@@ -73,7 +73,7 @@ class PifPafDijkstra(object):
             for stride, paf_i in zip(self.strides, self.paf_indices):
                 self.debug_visualizer.paf_raw(fields[paf_i], stride, reg_components=3)
 
-        # confidence scales
+        # ADDED: confidence scales
         if self.confidence_scales:
             for paf_i in self.paf_indices:
                 paf = fields[paf_i]
@@ -99,7 +99,7 @@ class PifPafDijkstra(object):
         paf_scored = PafScored(pifhr.targets, self.skeleton, score_th=self.paf_th)
         paf_scored.fill_sequence(
             normalized_pafs, self.strides, self.paf_min_distances, self.paf_max_distances)
-
+        # ADDED:
         gen = generator.Dijkstra(
             pifhr, paf_scored, seeds,
             seed_threshold=self.seed_threshold,

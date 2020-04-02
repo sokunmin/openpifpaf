@@ -7,16 +7,16 @@ class AnnRescaler(object):
         self.n_keypoints = n_keypoints
 
     def __call__(self, anns, width_height_original):
-        keypoint_sets = self.anns_to_keypoint_sets(anns)
-        keypoint_sets[:, :, :2] /= self.input_output_scale
+        keypoint_sets = self.anns_to_keypoint_sets(anns)  # ignore crowds -> (1,17,3)
+        keypoint_sets[:, :, :2] /= self.input_output_scale  # stride: 8.0
 
         # background mask
-        bg_mask = self.anns_to_bg_mask(width_height_original, anns)
-        bg_mask = bg_mask[::self.input_output_scale, ::self.input_output_scale]
+        bg_mask = self.anns_to_bg_mask(width_height_original, anns)  # > input square size: (H, W)
+        bg_mask = bg_mask[::self.input_output_scale, ::self.input_output_scale]  # > square size / 8 + 1
 
         # valid area
         valid_area = None
-        if anns and 'valid_area' in anns[0]:
+        if anns and 'valid_area' in anns[0]: # <- scale down `valid_area`
             valid_area = anns[0]['valid_area']
             valid_area = (
                 valid_area[0] / self.input_output_scale,
@@ -38,13 +38,13 @@ class AnnRescaler(object):
     @staticmethod
     def anns_to_bg_mask(width_height, anns, include_annotated=True):
         """Create background mask taking crowded annotations into account."""
-        mask = np.ones(width_height[::-1], dtype=np.bool)
-        for ann in anns:
+        mask = np.ones(width_height[::-1], dtype=np.bool)  # input square size
+        for ann in anns:  # > #obj
             if include_annotated and \
                not ann['iscrowd'] and \
                'keypoints' in ann and \
                np.any(ann['keypoints'][:, 2] > 0):
-                continue
+                continue  # not crowds + keypoint annos + visible
 
             if 'mask' not in ann:
                 bb = ann['bbox'].copy()

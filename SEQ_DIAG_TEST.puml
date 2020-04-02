@@ -1,0 +1,51 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title Test pipeline
+
+[-> eval_coco : run
+activate eval_coco
+eval_coco --> factory : decoder.factory_from_args(\nargs, model)
+activate factory
+factory -> factory : factory_decode(args)\n
+factory --> PifPaf : <<init>>(\nhead_cfg)
+activate PifPaf
+PifPaf --> factory : <b>decode</b>
+factory --> Processor : <<init>>(\nmodel, decode, args)
+activate Processor
+Processor --> eval_coco : <b>processor</b>
+deactivate factory
+
+eval_coco -> eval_coco : <b>preprocess</b>
+eval_coco --> EvalCoco : <<init>>(  <b>preprocess</b>  )
+activate EvalCoco
+EvalCoco --> eval_coco : <b>evalcoco</b>
+
+== load batch after preprocess /iteration ==
+eval_coco -> Processor : <b>processor</b>  .fields(image)
+Processor -> Processor : (1) feed imgs to model\n(2) to numpy \n(3) index by batch entry
+activate Processor
+Processor --> eval_coco : <b>fields_batch</b>
+eval_coco -> Processor : <b>processor</b>  .annotations_batch(\n<b>fields_batch</b>  , meta, imgs)
+Processor -> Processor : self._mappable_annotations()
+Processor -> Processor : self.annotations()
+Processor -> PifPaf : <b><font color=red>decode(fields)</font></b>
+note left: More details in \n<b>SEQ_DIAG_DECODE</b>
+PifPaf --> Processor : <b>annotations</b>
+Processor -> Processor : soft_nms(  <b>annotations</b>  ) \n -> <b>annotations</b>
+Processor -> Processor : (1) iterate all  <b>annotations</b>\n(2) filter w/ threshold\n(3) sort <b>annotations</b>
+deactivate Processor
+Processor --> eval_coco : <b>annotations</b> -> <b>pred_batch</b>
+activate eval_coco
+eval_coco -> eval_coco : <b>evalcoco</b>  .from_predictions(\nimgs, \n<b>pred_batch</b> , \nann_batch(targets), \nmeta_batch)
+
+== write results ==
+eval_coco -> eval_coco : write_evaluation(\n<b>evalcoco</b> , args)
+
+deactivate eval_coco
+deactivate PifPaf
+deactivate Processor
+deactivate EvalCoco
+deactivate eval_coco
+@enduml

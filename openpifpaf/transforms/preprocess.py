@@ -27,7 +27,7 @@ class Preprocess(metaclass=ABCMeta):
         return keypoint_sets
 
     @staticmethod
-    def annotations_inverse(annotations, meta):
+    def annotations_inverse(annotations, meta):  # TOCHECK: why use inverse?
         annotations = copy.deepcopy(annotations)
 
         for ann in annotations:

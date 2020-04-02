@@ -18,9 +18,9 @@ try:
 except ImportError:
     pass
 
-from .data import COCO_PERSON_SKELETON
-from .network import nets
-from . import datasets, decoder, encoder, show, transforms
+from openpifpaf.data import COCO_PERSON_SKELETON
+from openpifpaf.network import nets
+from openpifpaf import datasets, decoder, encoder, show, transforms
 
 ANNOTATIONS_VAL = 'data-mscoco/annotations/person_keypoints_val2017.json'
 IMAGE_DIR_VAL = 'data-mscoco/images/val2017/'
@@ -37,8 +37,8 @@ class EvalCoco(object):
         self.coco = coco
         self.processor = processor
         self.annotations_inverse = annotations_inverse
-        self.max_per_image = max_per_image
-        self.small_threshold = small_threshold
+        self.max_per_image = max_per_image  # Test: 20
+        self.small_threshold = small_threshold  # Test: 0.0
 
         self.predictions = []
         self.image_ids = []
@@ -302,7 +302,7 @@ def preprocess_factory_from_args(args):
         preprocess = transforms.Compose([
             transforms.NormalizeAnnotations(),
             transforms.RescaleAbsolute(args.long_edge),
-            transforms.CenterPad(args.long_edge),
+            transforms.CenterPad(args.long_edge),  # > TOCHECK: adding this means multi_scale?
             transforms.EVAL_TRANSFORM,
         ])
 
@@ -352,19 +352,19 @@ def main():
         LOG.info('batch %d, last loop: %.3fs, batches per second=%.1f',
                  batch_i, time.time() - loop_start,
                  batch_i / max(1, (time.time() - total_start)))
-        if batch_i < args.skip_n:
+        if batch_i < args.skip_n:  # Test: 0
             continue
-        if args.n and batch_i >= args.n:
+        if args.n and batch_i >= args.n:  # Test: 0
             break
 
         loop_start = time.time()
 
         if len([a
-                for anns in anns_batch
-                for a in anns
-                if np.any(a['keypoints'][:, 2] > 0)]) < args.min_ann:
+                for anns in anns_batch  # > #img
+                for a in anns  # > #obj
+                if np.any(a['keypoints'][:, 2] > 0)]) < args.min_ann:  # Test: 0
             continue
-
+        # -> model -> to numpy -> enlarge to edge size
         fields_batch = processor.fields(image_tensors_cpu)
 
         decoder_start = time.perf_counter()

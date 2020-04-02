@@ -1,7 +1,7 @@
 import numpy as np
 
 # pylint: disable=import-error
-from ..functional import scalar_value_clipped
+from openpifpaf.functional import scalar_value_clipped
 
 
 class Annotation(object):
@@ -34,11 +34,12 @@ class Annotation(object):
         return self
 
     def fill_joint_scales(self, scales, hr_scale=1.0):
-        self.joint_scales = np.zeros((self.data.shape[0],))
+        self.joint_scales = np.zeros((self.data.shape[0],))  # > (#kp)
         for xyv_i, xyv in enumerate(self.data):
             if xyv[2] == 0.0:
                 continue
-            scale = scalar_value_clipped(scales[xyv_i], xyv[0] * hr_scale, xyv[1] * hr_scale)
+            # > `scales`: (#kp, edgeH, edgeW) -> scale at xy coord
+            scale = scalar_value_clipped(scales[xyv_i], xyv[0] * hr_scale, xyv[1] * hr_scale)  # `hr_scale`: 1.0
             self.joint_scales[xyv_i] = scale / hr_scale
 
     def score(self):
@@ -53,32 +54,32 @@ class Annotation(object):
 
     def frontier(self):
         """Frontier to complete annotation.
-
+        skeleton_m1: skeleton connection pairs(p1, p2). E.g., (16,14), (14,12)...
         Format: (
             confidence of origin,
             connection index,
-            forward?,
+            forward? (True/False),
             joint index 1,  (not corrected for forward)
             joint index 2,  (not corrected for forward)
         )
         """
-        return sorted([
+        return sorted([  # `self.data`: (#kp, (x,y,v))), assigned in `self.add()`
             (self.data[j1i, 2], connection_i, True, j1i, j2i)
             for connection_i, (j1i, j2i) in enumerate(self.skeleton_m1)
-            if self.data[j1i, 2] > 0.0 and self.data[j2i, 2] == 0.0
+            if self.data[j1i, 2] > 0.0 and self.data[j2i, 2] == 0.0  # (a1:visited, a2:not visited)
         ] + [
             (self.data[j2i, 2], connection_i, False, j1i, j2i)
             for connection_i, (j1i, j2i) in enumerate(self.skeleton_m1)
-            if self.data[j2i, 2] > 0.0 and self.data[j1i, 2] == 0.0
+            if self.data[j2i, 2] > 0.0 and self.data[j1i, 2] == 0.0  # (a1:not visited, a2:visited)
         ], reverse=True)
 
     def frontier_iter(self):
-        frontier = list(self.frontier())
+        frontier = list(self.frontier())  # -> (score, conn_idx, forward?, joint_idx1, joint_idx2)
         while frontier:
             next_item = frontier.pop(0)
-            forward = next_item[2]
-            i_target = next_item[4] if forward else next_item[3]
-            xyv_target = self.data[i_target]
+            forward = next_item[2]  # forward?
+            i_target = next_item[4] if forward else next_item[3]  # use `joint_idx2` as target if `forward=True`
+            xyv_target = self.data[i_target]  # (17, (x,y,v))) -> get target item by index
 
             if xyv_target[2] != 0.0:
                 # another frontier connection has filled this joint
@@ -94,11 +95,11 @@ class Annotation(object):
             frontier += [
                 (self.data[j1i, 2], connection_i, True, j1i, j2i)
                 for connection_i, (j1i, j2i) in enumerate(self.skeleton_m1)
-                if j1i == i_target and self.data[j2i, 2] == 0.0
+                if j1i == i_target and self.data[j2i, 2] == 0.0  # (a1 == i_target) && (a2: not visited)
             ] + [
                 (self.data[j2i, 2], connection_i, False, j1i, j2i)
                 for connection_i, (j1i, j2i) in enumerate(self.skeleton_m1)
-                if j2i == i_target and self.data[j1i, 2] == 0.0
+                if j2i == i_target and self.data[j1i, 2] == 0.0  # (a2 == i_target) && (a1: not visited)
             ]
             frontier = list(sorted(frontier, reverse=True))
 

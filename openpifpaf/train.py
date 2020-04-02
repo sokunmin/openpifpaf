@@ -6,9 +6,9 @@ import socket
 
 import torch
 
-from . import datasets, encoder, logs, optimize, transforms
-from .network import losses, nets, Trainer
-from . import __version__ as VERSION
+from openpifpaf import datasets, encoder, logs, optimize, transforms
+from openpifpaf.network import losses, nets, Trainer
+from openpifpaf import __version__ as VERSION
 
 
 def default_output_file(args):
@@ -117,10 +117,10 @@ def main():
             transforms.NormalizeAnnotations(),
             transforms.AnnotationJitter(),
             transforms.RandomApply(transforms.HFlip(), 0.5),
-            transforms.RescaleRelative(scale_range=(0.4 * args.rescale_images,
+            transforms.RescaleRelative(scale_range=(0.4 * args.rescale_images,  # rescale_images: 1.0
                                                     2.0 * args.rescale_images),
                                        power_law=True),
-            transforms.Crop(args.square_edge),
+            transforms.Crop(args.square_edge),  # square_edge: 401
             transforms.CenterPad(args.square_edge),
         ]
         if args.orientation_invariant:
@@ -128,7 +128,7 @@ def main():
                 transforms.RotateBy90(),
             ]
         preprocess_transformations += [
-            transforms.TRAIN_TRANSFORM,
+            transforms.TRAIN_TRANSFORM,  # KpNorm + ColorJitter + JpegCompress + RandomGrayscale + ImgNorm
         ]
     else:
         preprocess_transformations = [
@@ -141,10 +141,9 @@ def main():
     train_loader, val_loader, pre_train_loader = datasets.train_factory(
         args, preprocess, target_transforms)
 
-    optimizer = optimize.factory_optimizer(
-        args, list(net.parameters()) + list(loss.parameters()))
+    optimizer = optimize.factory_optimizer(args, net.parameters())
     lr_scheduler = optimize.factory_lrscheduler(args, optimizer, len(train_loader))
-    encoder_visualizer = None
+    encoder_visualizer = None  # TOCHECK: test pipeline and debug mode
     if args.debug_pif_indices or args.debug_paf_indices:
         encoder_visualizer = encoder.Visualizer(
             args.headnets, net_cpu.head_strides,
@@ -185,11 +184,11 @@ def main():
         net, loss, optimizer, args.output,
         lr_scheduler=lr_scheduler,
         device=args.device,
-        fix_batch_norm=not args.update_batchnorm_runningstatistics,
-        stride_apply=args.stride_apply,
-        ema_decay=args.ema,
+        fix_batch_norm=not args.update_batchnorm_runningstatistics,  # TOCHECK: false
+        stride_apply=args.stride_apply,  # TOCHECK: stride_apply=1
+        ema_decay=args.ema,  # TOCHECK: ema=0.001
         encoder_visualizer=encoder_visualizer,
-        train_profile=args.profile,
+        train_profile=args.profile,  # TOCHECK: args.profile
         model_meta_data={
             'args': vars(args),
             'version': VERSION,

@@ -18,10 +18,10 @@ class NormalizeAnnotations(Preprocess):
             if 'keypoints' not in ann:
                 ann['keypoints'] = []
 
-            ann['keypoints'] = np.asarray(ann['keypoints'], dtype=np.float32).reshape(-1, 3)
+            ann['keypoints'] = np.asarray(ann['keypoints'], dtype=np.float32).reshape(-1, 3)  # (17,3)
             ann['bbox'] = np.asarray(ann['bbox'], dtype=np.float32)
             ann['bbox_original'] = np.copy(ann['bbox'])
-            if 'segmentation' in ann:
+            if 'segmentation' in ann:  # TOCHECK: why delete segm?
                 del ann['segmentation']
 
         return anns
@@ -34,7 +34,7 @@ class NormalizeAnnotations(Preprocess):
             meta = {
                 'offset': np.array((0.0, 0.0)),
                 'scale': np.array((1.0, 1.0)),
-                'valid_area': np.array((0.0, 0.0, w, h)),
+                'valid_area': np.array((0.0, 0.0, w, h)),  # orig shape
                 'hflip': False,
                 'width_height': np.array((w, h)),
             }
@@ -51,8 +51,8 @@ class AnnotationJitter(Preprocess):
         anns = copy.deepcopy(anns)
 
         for ann in anns:
-            keypoints_xy = ann['keypoints'][:, :2]
-            sym_rnd = (torch.rand(*keypoints_xy.shape).numpy() - 0.5) * 2.0
-            keypoints_xy += self.epsilon * sym_rnd
+            keypoints_xy = ann['keypoints'][:, :2]  # (17, x,y,v) -> (17, x,y)
+            sym_rnd = (torch.rand(*keypoints_xy.shape).numpy() - 0.5) * 2.0  # TOCHECK: why jitter keypoints?
+            keypoints_xy += self.epsilon * sym_rnd  # epsilon: 0.5
 
         return image, anns, meta

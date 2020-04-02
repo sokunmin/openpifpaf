@@ -17,7 +17,7 @@ class Crop(Preprocess):
     def __call__(self, image, anns, meta):
         meta = copy.deepcopy(meta)
         anns = copy.deepcopy(anns)
-        original_valid_area = meta['valid_area'].copy()
+        original_valid_area = meta['valid_area'].copy()  # valid_area=(0,0,w,h) * scale_factors
 
         image, anns, ltrb = self.crop(image, anns, meta['valid_area'])
         meta['offset'] += ltrb[:2]
@@ -41,7 +41,7 @@ class Crop(Preprocess):
     @staticmethod
     def area_of_interest(anns, valid_area):
         """area that contains annotations with keypoints"""
-
+        # > not `iscrowd` and keypoints > 0
         anns_of_interest = [
             ann for ann in anns
             if not ann.get('iscrowd', False) and np.any(ann['keypoints'][:, 2] > 0)
@@ -70,16 +70,16 @@ class Crop(Preprocess):
         return (
             topleft[0],
             topleft[1],
-            bottomright[0] - topleft[0],
+            bottomright[0] - topleft[0],  # TOCHECK: why do this?
             bottomright[1] - topleft[1],
         )
 
     def crop(self, image, anns, valid_area):
-        if self.use_area_of_interest:
+        if self.use_area_of_interest:  # <-
             area_of_interest = self.area_of_interest(anns, valid_area)
         else:
             area_of_interest = valid_area
-
+        # TOCHECK: how to crop an image?
         w, h = image.size
         padding = int(self.long_edge / 2.0)
         x_offset, y_offset = 0, 0

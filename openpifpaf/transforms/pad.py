@@ -31,7 +31,7 @@ class CenterPad(Preprocess):
         return image, anns, meta
 
     def center_pad(self, image, anns):
-        w, h = image.size
+        w, h = image.size  # square img
 
         left = int((self.target_size[0] - w) / 2.0)
         top = int((self.target_size[1] - h) / 2.0)
@@ -51,7 +51,7 @@ class CenterPad(Preprocess):
         # pad image
         image = torchvision.transforms.functional.pad(
             image, ltrb, fill=(124, 116, 104))
-
+        # TOCHECK: when image is padded, why pad annos too?
         # pad annotations
         for ann in anns:
             ann['keypoints'][:, 0] += ltrb[0]

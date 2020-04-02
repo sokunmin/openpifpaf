@@ -1,9 +1,6 @@
 # History
 
-* [master](https://github.com/vita-epfl/openpifpaf/compare/v0.10.1...master)
-* [0.10.1](https://github.com/vita-epfl/openpifpaf/compare/v0.10.0...v0.10.1) (2019-12-09)
-    * faster decoder
-    * refactored scale generation between loss and encoder
+* [master](https://github.com/vita-epfl/openpifpaf/compare/v0.10.0...master)
 * [0.10.0](https://github.com/vita-epfl/openpifpaf/compare/v0.9.0...v0.10.0) (2019-10-21)
     * major refactor: move all factory-code into factories
     * new experimental decoder

@@ -1,0 +1,152 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title Training pipeline
+
+[-> train : run
+activate train
+
+train --> Trainer : <<init>>
+activate Trainer
+
+participant loader << (T,#ADD1B2) DataLoader >> #EEEEEE
+train -->> loader : <<init>>
+activate loader #EEEEEE
+
+Trainer --> Shell : <<init>>
+activate Shell
+create BaseNetwork
+Shell --> BaseNetwork : <<init>>
+activate BaseNetwork
+BaseNetwork --> Shell : basenetwork
+create Composite
+Shell --> Composite : <<init>>\nPif head
+activate Composite
+Composite --> Shell : pif_head
+Shell --> Composite : <<init>>\nPaf head
+Composite --> Shell : paf_head
+Shell --> Trainer : model
+
+train --> CocoKeypoints : <<init>>
+activate CocoKeypoints
+CocoKeypoints --> loader
+
+train --> preprocess : <<init>>
+activate preprocess
+preprocess --> loader : series of augm
+loader --> Trainer : loaders
+
+train --> target_transform : <<init>>
+activate target_transform
+target_transform --> Pif : <<init>>
+Pif --> target_transform
+activate Pif
+target_transform --> Paf : <<init>>
+activate Paf
+Paf --> target_transform
+target_transform --> Trainer
+
+train --> LearningRateLambda : <<init>>
+activate LearningRateLambda
+LearningRateLambda --> Trainer : lr_scheduler
+
+train --> MultiHeadLoss : <<init>>
+activate MultiHeadLoss
+create CompositeLoss
+MultiHeadLoss --> CompositeLoss : <<init>> <b>pif</b>
+activate CompositeLoss
+MultiHeadLoss --> CompositeLoss : <<init>> <b>paf</b>
+MultiHeadLoss --> Trainer : losses
+
+== training loop ==
+Trainer -> Trainer : loop()
+activate Trainer
+loop #d0f5f2 #epochs
+    Trainer -> LearningRateLambda : lr_scheduler.step()
+'    run train()
+    Trainer -> Trainer : train()
+    activate Trainer #44f2ac
+    group extract batch data
+        Trainer -->> loader
+        loader -> CocoKeypoints : <b>CocoKeypoints</b>.__getitem__()
+        CocoKeypoints -> preprocess : apply series of augm\n<<Compose>>
+        preprocess --> CocoKeypoints : image, anns, meta
+        CocoKeypoints -> CocoKeypoints : utils.mask_valid_area(image, valid_area)
+        CocoKeypoints -> target_transform : <b>Pif/Paf</b>.forward()
+        group #faf6d7 Pif
+            target_transform -> Pif
+            Pif --> AnnRescaler : <<init>>
+            activate AnnRescaler
+            AnnRescaler -> AnnRescaler : forward(ann, img_size)
+            AnnRescaler -> AnnRescaler : anns_to_keypoint_sets(ann)\nscale kp w/ stride
+            AnnRescaler -> AnnRescaler : anns_to_bg_mask(img_size, ann)\nscale mask and valid_area w/ stride
+            AnnRescaler --> Pif : keypoint_sets, bg_mask, valid_area
+            deactivate AnnRescaler
+            Pif --> PifGenerator : <<init>
+            PifGenerator -> PifGenerator : create_sink(side_length)
+            activate PifGenerator
+            PifGenerator --> Pif : f
+            Pif -> PifGenerator : f.init_fields()
+            Pif -> PifGenerator : f.fill()
+            Pif -> PifGenerator : f.fields(valid_area)
+            PifGenerator --> Pif
+            deactivate PifGenerator
+            Pif -> target_transform : valid_area
+        end
+        group #faf6d7 Paf
+            target_transform -> Paf
+            Paf -> AnnRescaler
+            activate AnnRescaler
+            Paf -> PafGenerator
+            activate PafGenerator
+            Paf -> target_transform : valid_area
+            deactivate AnnRescaler
+            deactivate PafGenerator
+        end
+        target_transform --> CocoKeypoints : anns of <b>Pif</b> and <b>Paf</b>
+        CocoKeypoints --> loader : [batch_data]\nimage, anns, meta
+        group single iteration
+            group train batch
+                Trainer -> Trainer : train_batch()
+                activate Trainer #f28aef
+                deactivate Trainer
+                Trainer -> Shell : feed backbone w/ input
+                Shell -> BaseNetwork : feed input
+                BaseNetwork --> Shell : output
+                Shell -> Composite : feed <b>pif</b> head
+                Composite --> Shell : <b>pif</b> output\n
+                Shell -> Composite : feed <b>paf</b> head
+                Composite --> Shell : <b>paf</b> output
+
+            end
+            group #f8d7fa loss
+                Trainer -> MultiHeadLoss
+                MultiHeadLoss -> CompositeLoss : <b>pif</b> outputs & targets
+                MultiHeadLoss -> CompositeLoss : <b>paf</b> outputs & targets
+
+                MultiHeadLoss --> Trainer : loss, head_losses
+                deactivate MultiHeadLoss
+            end
+        end
+    end
+    Trainer -> Trainer : write_model()
+    Trainer -> Trainer : val()
+    deactivate Trainer
+end
+
+deactivate Trainer
+deactivate Trainer
+deactivate preprocess
+deactivate loader
+deactivate LearningRateLambda
+deactivate CocoKeypoints
+deactivate Shell
+deactivate Composite
+deactivate BaseNetwork
+deactivate target_transform
+deactivate MultiHeadLoss
+deactivate  CompositeLoss
+deactivate train
+[<- train : done
+@enduml

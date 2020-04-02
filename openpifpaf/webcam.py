@@ -22,8 +22,8 @@ import PIL
 import torch
 
 import cv2  # pylint: disable=import-error
-from .network import nets
-from . import decoder, show, transforms
+from openpifpaf.network import nets
+from openpifpaf import decoder, show, transforms
 
 try:
     import matplotlib.pyplot as plt

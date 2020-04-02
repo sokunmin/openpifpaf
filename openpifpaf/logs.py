@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import pysparkling
 
-from . import show
+from openpifpaf import show
 
 try:
     import matplotlib
@@ -31,8 +31,10 @@ def cli(parser):
 def configure(args):
     # pylint: disable=import-outside-toplevel
     from pythonjsonlogger import jsonlogger
-    from . import __version__ as VERSION
-
+    from openpifpaf import __version__ as VERSION
+    import os
+    if not os.path.exists(os.path.dirname(args.output)):
+        os.makedirs(os.path.dirname(args.output))
     file_handler = logging.FileHandler(args.output + '.log', mode='w')
     file_handler.setFormatter(
         jsonlogger.JsonFormatter('(message) (levelname) (name) (asctime)'))
@@ -51,7 +53,7 @@ def configure(args):
 
 
 def optionally_shaded(ax, x, y, *, color, label, **kwargs):
-    stride = int(len(x) / (x[-1] - x[0]) / 30.0) if len(x) > 30 else 1  # 30 per epoch
+    stride = int(len(x) / (x[-1] - x[0]) / 30.0)  # 30 per epoch
     if stride > 5 and len(x) / stride > 2:
         x_binned = np.array([x[i] for i in range(0, len(x), stride)][:-1])
         y_binned = np.stack([y[i:i + stride] for i in range(0, len(x), stride)][:-1])
@@ -229,7 +231,6 @@ class Plots(object):
         ax.legend(loc='upper right')
 
     def train(self, ax):
-        miny = 0.0
         for color_i, (data, label) in enumerate(zip(self.datas, self.labels)):
             color = matplotlib.cm.get_cmap('tab10')((color_i % 10 + 0.05) / 10)
             if 'train' in data:
@@ -242,7 +243,6 @@ class Plots(object):
                 for loss_index, xy in xy_all.items():
                     x = np.array([x for x, _ in xy])
                     y = np.array([y for _, y in xy], dtype=np.float)
-                    miny = min(miny, np.min(y))
 
                     kwargs = {}
                     this_label = label
@@ -254,7 +254,7 @@ class Plots(object):
         ax.set_xlabel('epoch')
         ax.set_ylabel('training loss')
         # ax.set_ylim(0, 8)
-        if miny > -0.1:
+        if min(y) > -0.1:
             ax.set_yscale('log', nonposy='clip')
         ax.grid(linestyle='dotted')
         ax.legend(loc='upper right')
@@ -273,7 +273,18 @@ class Plots(object):
                 y = np.array([row.get('head_losses')[field_i]
                               for row in data['train']], dtype=np.float)
                 m = np.logical_not(np.isnan(y))
-                optionally_shaded(ax, x[m], y[m], color=color, label=label)
+                x, y = x[m], y[m]
+                stride = int(len(x) / (x[-1] - x[0]) / 30.0)  # 30 per epoch
+                if stride > 5 and len(x) / stride > 2:
+                    x_binned = np.array([x[i] for i in range(0, len(x), stride)][:-1])
+                    y_binned = np.stack([y[i:i + stride] for i in range(0, len(x), stride)][:-1])
+                    y_mean = np.mean(y_binned, axis=1)
+                    y_min = np.min(y_binned, axis=1)
+                    y_max = np.max(y_binned, axis=1)
+                    ax.plot(x_binned, y_mean, color=color, label=label)
+                    ax.fill_between(x_binned, y_min, y_max, alpha=0.2, facecolor=color)
+                else:
+                    ax.plot(x, y, color=color, label=label)
 
         ax.set_xlabel('epoch')
         ax.set_ylabel('training loss, {}'.format(field_name))
@@ -283,37 +294,12 @@ class Plots(object):
         ax.grid(linestyle='dotted')
         # ax.legend(loc='upper right')
 
-    def mtl_sigma(self, ax, field_name):
-        field_names = self.field_names()
-        for color_i, (data, label) in enumerate(zip(self.datas, self.labels)):
-            color = matplotlib.cm.get_cmap('tab10')((color_i % 10 + 0.05) / 10)
-            if field_name not in field_names[label]:
-                continue
-            field_i = field_names[label].index(field_name)
-
-            if 'train' in data:
-                x = np.array([row.get('epoch') + row.get('batch') / row.get('n_batches')
-                              for row in data['train']])
-                y = np.array([row['mtl_sigmas'][field_i] if 'mtl_sigmas' in row else np.nan
-                              for row in data['train']], dtype=np.float)
-                m = np.logical_not(np.isnan(y))
-                optionally_shaded(ax, x[m], y[m], color=color, label=label)
-
-        ax.set_xlabel('epoch')
-        ax.set_ylabel('MTL sigma, {}'.format(field_name))
-        ax.set_ylim(-0.1, 1.1)
-        if min(y) > -0.1:
-            ax.set_ylim(3e-3, 3.0)
-            ax.set_yscale('log', nonposy='clip')
-        ax.grid(linestyle='dotted')
-        # ax.legend(loc='upper right')
-
     def print_last_line(self):
         for data, label in zip(self.datas, self.labels):
             if 'train' in data:
                 print('{}: {}'.format(label, data['train'][-1]))
 
-    def show_all(self, *, share_y=True, show_mtl_sigmas=False):
+    def show_all(self, *, share_y=True):
         pprint(self.process_arguments())
 
         rows = defaultdict(list)
@@ -324,9 +310,6 @@ class Plots(object):
                     rows[row_name].append(f)
         n_rows = len(rows)
         n_cols = max(len(r) for r in rows.values())
-        multi_figsize = (5 * n_cols, 2.5 * n_rows)
-        if multi_figsize[0] > 40.0:
-            multi_figsize = (40.0, multi_figsize[1] / multi_figsize[0] * 40.0)
 
         with show.canvas() as ax:
             self.time(ax)
@@ -338,7 +321,7 @@ class Plots(object):
             self.lr(ax)
 
         with show.canvas(nrows=n_rows, ncols=n_cols, squeeze=False,
-                         figsize=multi_figsize,
+                         figsize=(5 * n_cols, 2.5 * n_rows),
                          sharey=share_y, sharex=True) as axs:
             for row_i, row in enumerate(rows.values()):
                 for col_i, field_name in enumerate(row):
@@ -351,19 +334,11 @@ class Plots(object):
             self.preprocess_time(ax)
 
         with show.canvas(nrows=n_rows, ncols=n_cols, squeeze=False,
-                         figsize=multi_figsize,
+                         figsize=(5 * n_cols, 2.5 * n_rows),
                          sharey=share_y, sharex=True) as axs:
             for row_i, row in enumerate(rows.values()):
                 for col_i, field_name in enumerate(row):
                     self.train_head(axs[row_i, col_i], field_name)
-
-        if show_mtl_sigmas:
-            with show.canvas(nrows=n_rows, ncols=n_cols, squeeze=False,
-                             figsize=multi_figsize,
-                             sharey=share_y, sharex=True) as axs:
-                for row_i, row in enumerate(rows.values()):
-                    for col_i, field_name in enumerate(row):
-                        self.mtl_sigma(axs[row_i, col_i], field_name)
 
         with show.canvas() as ax:
             self.train(ax)
@@ -507,7 +482,6 @@ def main():
                         help='dont share y access')
     parser.add_argument('-o', '--output', default=None,
                         help='output prefix (default is log_file + .)')
-    parser.add_argument('--show-mtl-sigmas', default=False, action='store_true')
     args = parser.parse_args()
 
     if args.output is None:
@@ -516,8 +490,7 @@ def main():
     EvalPlots(args.log_file, args.label, args.output,
               edge=args.eval_edge,
               samples=args.eval_samples).show_all(share_y=args.share_y)
-    Plots(args.log_file, args.label, args.output).show_all(
-        share_y=args.share_y, show_mtl_sigmas=args.show_mtl_sigmas)
+    Plots(args.log_file, args.label, args.output).show_all(share_y=args.share_y)
 
 
 if __name__ == '__main__':

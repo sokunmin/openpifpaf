@@ -1,0 +1,115 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title Training pipeline
+
+[-> train : run
+activate train
+train -> train : parse args
+
+== init model ==
+
+train -> nets : nets.factory_from_args(args)
+activate nets
+nets -> heads : heads.factory(args)
+activate heads
+note left: More details in \n<b>SEQ_DIAG_INIT_MODEL</b>
+nets ->]
+heads --> nets
+deactivate heads
+nets --> train : net, start_epoch
+deactivate nets
+
+box "Model"
+    participant nets
+    participant heads
+end box
+
+== init losses ==
+
+train -> losses : losses.factory(args)
+activate losses
+create "losses:CompositeLoss"
+losses --> "losses:CompositeLoss" : <<init>>\n(head_names, \nreg_loss_callbacks)
+activate "losses:CompositeLoss"
+"losses:CompositeLoss" --> losses : losses
+create "loss:MultiHeadLoss"
+losses --> "loss:MultiHeadLoss" : <<init>>\n(losses, lambdas)
+activate "loss:MultiHeadLoss"
+"loss:MultiHeadLoss" --> losses : loss
+losses --> train : loss
+deactivate losses
+
+box Loss
+    participant "losses:CompositeLoss"
+    participant "loss:MultiHeadLoss"
+end box
+
+== init encoder/transforms ==
+
+train -> encoder : encoder.factory(args, net)
+activate encoder
+encoder -> encoder : configure \n<b>Pif</b> & <b>Paf</b> heads
+activate encoder
+note left: More details in \n<b>SEQ_DIAG_INIT_AUG</b>
+encoder --> train : target_transforms <<Pif/Paf>>
+train -> transforms
+activate transforms
+transforms -> train : preprocess
+deactivate transforms
+deactivate encoder
+deactivate encoder
+
+== init datasets ==
+
+train -> datasets : train_factory(args, preprocess, target_transforms)
+activate datasets
+create CocoKeypoints
+datasets --> CocoKeypoints : <<init>>(args)
+activate CocoKeypoints
+CocoKeypoints --> datasets : train_data
+create DataLoader
+datasets -->> DataLoader : <<init>>(train_data)
+DataLoader --> datasets : train_loader
+activate DataLoader
+
+CocoKeypoints --> datasets : val_data
+datasets -->> DataLoader : <<init>>(val_data)
+DataLoader --> datasets : val_loader
+
+CocoKeypoints --> datasets : pre_train_data
+datasets -->> DataLoader : <<init>>(pre_train_data)
+DataLoader --> datasets : pre_train_loader
+datasets --> train : train_loader, val_loader, pre_train_loader
+deactivate datasets
+
+== init optimizer ==
+
+train -> optimizer : optimize.factory_optimizer(args, net.param)
+activate optimizer
+optimizer --> train : optimizer
+train -> optimizer : optimize.factory_lrscheduler(args, optimizer)
+create LearningRateLambda
+optimizer --> LearningRateLambda : <<init>>\n(args, #batch)
+activate LearningRateLambda
+optimizer --> train : lr_scheduler
+
+deactivate optimizer
+
+== start training ==
+create "trainer:Trainer"
+train --> "trainer:Trainer" : <<init>>\n(net, loss, optimizer, lr_scheduler, args)
+activate "trainer:Trainer"
+note left of "trainer:Trainer": More details in \n<b>SEQ_DIAG_TRAIN</b>
+train -> "trainer:Trainer" : loop(train_loader, val_loader, args)
+
+deactivate train
+deactivate "losses:CompositeLoss"
+deactivate "loss:MultiHeadLoss"
+deactivate CocoKeypoints
+deactivate DataLoader
+deactivate LearningRateLambda
+deactivate "trainer:Trainer"
+[<- train : done
+@enduml

@@ -2,24 +2,22 @@ import logging
 import torch
 import torchvision
 
-from . import basenetworks, heads
-from ..data import COCO_KEYPOINTS, COCO_PERSON_SKELETON, DENSER_COCO_PERSON_CONNECTIONS, HFLIP
+from openpifpaf.network import basenetworks, heads
+from openpifpaf.data import COCO_KEYPOINTS, COCO_PERSON_SKELETON, DENSER_COCO_PERSON_CONNECTIONS, HFLIP
 
 # generate hash values with: shasum -a 256 filename.pkl
 
-RESNET18_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
-                  'v0.10.1/resnet18-pif-paf-paf25-edge401-191022-210137-84326f0f.pkl')
-RESNET50_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+RESNET50_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                   'v0.10.0/resnet50-pif-paf-paf25-edge401-191016-192503-d2b85396.pkl')
-RESNET101_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+RESNET101_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                    'v0.10.0/resnet101block5-pif-paf-paf25-edge401-191012-132602-a2bf7ecd.pkl')
-RESNET152_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+RESNET152_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                    'v0.1.0/resnet152block5-pif-paf-edge401-190625-185426-3e2f28ed.pkl')
-RESNEXT50_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+RESNEXT50_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                    'v0.1.0/resnext50block5-pif-paf-edge401-190629-151121-24491655.pkl')
-SHUFFLENETV2X1_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+SHUFFLENETV2X1_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                         'v0.1.0/shufflenetv2x1-pif-paf-edge401-190705-151607-d9a35d7e.pkl')
-SHUFFLENETV2X2_MODEL = ('http://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
+SHUFFLENETV2X2_MODEL = ('https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/'
                         'v0.10.0/shufflenetv2x2-pif-paf-paf25-edge401-191010-172527-ef704f06.pkl')
 
 LOG = logging.getLogger(__name__)
@@ -36,21 +34,21 @@ class Shell(torch.nn.Module):
             h.shortname for h in head_nets
         ]
         self.head_strides = head_strides or [
-            base_net.input_output_scale // (2 ** getattr(h, '_quad', 0))
-            for h in head_nets
+            base_net.input_output_scale // (2 ** getattr(h, '_quad', 0))  # `_quad` is assigned by args.
+            for h in head_nets # > #heads -> [8, 8]
         ]
-        self.process_heads = process_heads
-        self.cross_talk = cross_talk
+        self.process_heads = process_heads  # > TOCHECK
+        self.cross_talk = cross_talk  # > TOCHECK
 
     def forward(self, *args):
-        image_batch = args[0]
+        image_batch = args[0] # > (#obj, C, H, W)
 
-        if self.training and self.cross_talk:
+        if self.training and self.cross_talk:  # TOCHECK: why `cross_talk`?
             rolled_images = torch.cat((image_batch[-1:], image_batch[:-1]))
             image_batch += rolled_images * self.cross_talk
 
-        x = self.base_net(image_batch)
-        head_outputs = [hn(x) for hn in self.head_nets]
+        x = self.base_net(image_batch)  # > (#obj, 2048, feat_H, feat_W)
+        head_outputs = [hn(x) for hn in self.head_nets]  # > [pif_head, paf_head]
 
         if self.process_heads is not None:
             head_outputs = self.process_heads(*head_outputs)
@@ -58,7 +56,7 @@ class Shell(torch.nn.Module):
         return head_outputs
 
 
-class Shell2Scale(torch.nn.Module):
+class Shell2Scale(torch.nn.Module):  # TOCHECK
     def __init__(self, base_net, head_nets, *,
                  head_names=None, head_strides=None, reduced_stride=3):
         super(Shell2Scale, self).__init__()
@@ -125,7 +123,7 @@ class Shell2Scale(torch.nn.Module):
         return original_heads
 
 
-class ShellMultiScale(torch.nn.Module):
+class ShellMultiScale(torch.nn.Module):  # > TBC
     def __init__(self, base_net, head_nets, *,
                  head_strides=None, process_heads=None, include_hflip=True):
         super(ShellMultiScale, self).__init__()
@@ -180,8 +178,8 @@ class ShellMultiScale(torch.nn.Module):
 
 def factory_from_args(args):
     # configure CompositeField
-    heads.CompositeField.dropout_p = args.head_dropout
-    heads.CompositeField.quad = args.head_quad
+    heads.CompositeField.dropout_p = args.head_dropout  # Test: 0.0
+    heads.CompositeField.quad = args.head_quad  # Test: 0
 
     return factory(
         checkpoint=args.checkpoint,
@@ -189,10 +187,10 @@ def factory_from_args(args):
         head_names=args.headnets,
         pretrained=args.pretrained,
         experimental=getattr(args, 'experimental_decoder', False),
-        cross_talk=args.cross_talk,
+        cross_talk=args.cross_talk,  # TOCHECK
         two_scale=args.two_scale,
-        multi_scale=args.multi_scale,
-        multi_scale_hflip=args.multi_scale_hflip,
+        multi_scale=args.multi_scale,  # TOCHECK: to test w/ or w/o multiscale
+        multi_scale_hflip=args.multi_scale_hflip,  # True
     )
 
 
@@ -243,7 +241,7 @@ def model_migration(net_cpu):
 
 
 def model_defaults(net_cpu):
-    for m in net_cpu.modules():
+    for m in net_cpu.modules(): # TOCHECK
         if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)):
             # avoid numerical instabilities
             # (only seen sometimes when training with GPU)
@@ -273,24 +271,21 @@ def factory(
         epoch = 0
     else:
         if not checkpoint:
-            checkpoint = torch.hub.load_state_dict_from_url(RESNET50_MODEL, check_hash=True)
-        elif checkpoint == 'resnet18':
-            checkpoint = torch.hub.load_state_dict_from_url(RESNET18_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(RESNET50_MODEL)
         elif checkpoint == 'resnet50':
-            checkpoint = torch.hub.load_state_dict_from_url(RESNET50_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(RESNET50_MODEL)
         elif checkpoint == 'resnet101':
-            checkpoint = torch.hub.load_state_dict_from_url(RESNET101_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(RESNET101_MODEL)
         elif checkpoint == 'resnet152':
-            checkpoint = torch.hub.load_state_dict_from_url(RESNET152_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(RESNET152_MODEL)
         elif checkpoint == 'resnext50':
-            checkpoint = torch.hub.load_state_dict_from_url(RESNEXT50_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(RESNEXT50_MODEL)
         elif checkpoint == 'shufflenetv2x1':
-            checkpoint = torch.hub.load_state_dict_from_url(SHUFFLENETV2X1_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(SHUFFLENETV2X1_MODEL)
         elif checkpoint == 'shufflenetv2x2':
-            checkpoint = torch.hub.load_state_dict_from_url(SHUFFLENETV2X2_MODEL, check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(SHUFFLENETV2X2_MODEL)
         elif checkpoint.startswith('http'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                checkpoint, check_hash=not checkpoint.startswith('https'))
+            checkpoint = torch.hub.load_state_dict_from_url(checkpoint)
         else:
             checkpoint = torch.load(checkpoint)
         net_cpu = checkpoint['model']
@@ -307,12 +302,12 @@ def factory(
     elif experimental and multi_scale:
         net_cpu.process_heads = heads.HeadStacks(
             [(v * 3 + 1, v * 3 + 2) for v in range(10)])
-    net_cpu.cross_talk = cross_talk
+    net_cpu.cross_talk = cross_talk  # > 0.0
 
-    if two_scale:
+    if two_scale:  # > TOCHECK
         net_cpu = Shell2Scale(net_cpu.base_net, net_cpu.head_nets)
 
-    if multi_scale:
+    if multi_scale:  # > TOCHECK
         net_cpu = ShellMultiScale(net_cpu.base_net, net_cpu.head_nets,
                                   process_heads=net_cpu.process_heads,
                                   include_hflip=multi_scale_hflip)
@@ -395,7 +390,7 @@ def resnet_factory_from_scratch(basename, base_vision, out_features, headnames):
         resnet_factory.block3(),
         resnet_factory.block4(),
     ]
-    if 'block4' not in basename:
+    if 'block4' not in basename:  # <-
         blocks.append(resnet_factory.block5())
     else:
         out_features //= 2
@@ -413,7 +408,7 @@ def resnet_factory_from_scratch(basename, base_vision, out_features, headnames):
     )
     headnets = [heads.factory(h, basenet.out_features) for h in headnames if h != 'skeleton']
     net_cpu = Shell(basenet, headnets)
-    model_defaults(net_cpu)
+    model_defaults(net_cpu)  # > init `BN`
     return net_cpu
 
 

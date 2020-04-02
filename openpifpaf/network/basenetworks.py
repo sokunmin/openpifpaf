@@ -16,7 +16,7 @@ class BaseNetwork(torch.nn.Module):
         self.out_features = out_features
 
         # print(list(net.children()))
-        LOG.info('stride = %d', self.input_output_scale)
+        LOG.info('stide = %d', self.input_output_scale)
         LOG.info('output features = %d', self.out_features)
 
     def forward(self, *args):
@@ -57,7 +57,7 @@ class ResnetBlocks(object):
     def input_block(self, use_pool=False, conv_stride=2, pool_stride=2):
         modules = self.modules[:4]
 
-        if not use_pool:
+        if not use_pool:  # > remove pooling layer
             modules.pop(3)
         else:
             if pool_stride != 2:

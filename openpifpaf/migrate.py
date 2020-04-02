@@ -5,7 +5,7 @@ import logging
 
 import torch
 
-from .network import nets
+from openpifpaf.network import nets
 
 
 def main():

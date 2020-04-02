@@ -1,10 +1,26 @@
 import numpy as np
 
-
+# TOCHECK: why `ankle` is first?
 COCO_PERSON_SKELETON = [
-    (16, 14), (14, 12), (17, 15), (15, 13), (12, 13), (6, 12), (7, 13),
-    (6, 7), (6, 8), (7, 9), (8, 10), (9, 11), (2, 3), (1, 2), (1, 3),
-    (2, 4), (3, 5), (4, 6), (5, 7),
+    (16, 14),  # left ankle -> left knee
+    (14, 12),  # left knee -> left hip
+    (17, 15),  # right ankle -> right knee
+    (15, 13),  # right knee -> right hip
+    (12, 13),  # left hip -> right hip
+    (6, 12),  # left shoulder -> left hip
+    (7, 13),  # right shoulder -> right hip
+    (6, 7),  # left shoulder -> right shoulder
+    (6, 8),  # left shoulder -> left elbow
+    (7, 9),  # right shoulder -> right elbow
+    (8, 10),  # left elbow -> left wrist
+    (9, 11),  # right elbow -> right wrist
+    (2, 3),  # left eye -> right eye
+    (1, 2),  # nose -> left eye
+    (1, 3),  # nose -> right eye
+    (2, 4),  # left eye -> left ear
+    (3, 5),  # right eye -> right ear
+    (4, 6),  # left ear -> left shoulder
+    (5, 7),  # right ear -> right shoulder
 ]
 
 
@@ -83,7 +99,7 @@ DENSER_COCO_PERSON_CONNECTIONS = [
     if c not in COCO_PERSON_SKELETON
 ]
 
-
+# > TOCHECK: learn it instead of defining it?
 COCO_PERSON_SIGMAS = [
     0.026,  # nose
     0.025,  # eyes
@@ -106,7 +122,7 @@ COCO_PERSON_SIGMAS = [
 
 
 def draw_skeletons():
-    from . import show  # pylint: disable=import-outside-toplevel
+    from openpifpaf import show  # pylint: disable=import-outside-toplevel
     coordinates = np.array([[
         [0.0, 9.3, 2.0],  # 'nose',            # 1
         [-0.5, 9.7, 2.0],  # 'left_eye',        # 2

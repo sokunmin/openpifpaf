@@ -1,12 +1,12 @@
 import logging
 
 from ..data import COCO_KEYPOINTS, COCO_PERSON_SKELETON, DENSER_COCO_PERSON_CONNECTIONS
-from .pif import Pif
-from .pif_hr import PifHr
-from .pifpaf import PifPaf
-from .pifpaf_dijkstra import PifPafDijkstra
-from .processor import Processor
-from .visualizer import Visualizer
+from openpifpaf.decoder.pif import Pif
+from openpifpaf.decoder.pif_hr import PifHr
+from openpifpaf.decoder.pifpaf import PifPaf
+from openpifpaf.decoder.pifpaf_dijkstra import PifPafDijkstra
+from openpifpaf.decoder.processor import Processor
+from openpifpaf.decoder.visualizer import Visualizer
 
 LOG = logging.getLogger(__name__)
 
@@ -53,18 +53,14 @@ def cli(parser, *,
                        help='profile decoder')
 
     group = parser.add_argument_group('PifPaf decoders')
-    assert PifPaf.fixed_b == PifPafDijkstra.fixed_b
     group.add_argument('--fixed-b', default=PifPaf.fixed_b, type=float,
                        help='overwrite b with fixed value, e.g. 0.5')
-    assert PifPaf.pif_fixed_scale == PifPafDijkstra.pif_fixed_scale
     group.add_argument('--pif-fixed-scale', default=PifPaf.pif_fixed_scale, type=float,
                        help='overwrite pif scale with a fixed value')
     group.add_argument('--pif-th', default=PifHr.v_threshold, type=float,
                        help='pif threshold')
-    assert PifPaf.paf_th == PifPafDijkstra.paf_th
     group.add_argument('--paf-th', default=PifPaf.paf_th, type=float,
                        help='paf threshold')
-    assert PifPaf.connection_method == PifPafDijkstra.connection_method
     group.add_argument('--connection-method',
                        default=PifPaf.connection_method,
                        choices=('median', 'max', 'blend'),
@@ -73,27 +69,24 @@ def cli(parser, *,
 
 def factory_from_args(args, model, device=None):
     # configure PifPaf
-    PifPaf.fixed_b = args.fixed_b
-    PifPaf.pif_fixed_scale = args.pif_fixed_scale
-    PifPaf.paf_th = args.paf_th
-    PifPaf.connection_method = args.connection_method
-    PifPaf.force_complete = args.force_complete_pose
+    PifPaf.fixed_b = args.fixed_b  # Test: None
+    PifPaf.pif_fixed_scale = args.pif_fixed_scale  # Test: None
+    PifPaf.paf_th = args.paf_th  # Test: 0.1
+    PifPaf.connection_method = args.connection_method  # Test: blend
+    PifPaf.force_complete = args.force_complete_pose  # Test: True
 
     # configure PifPafDijkstra
-    PifPafDijkstra.fixed_b = args.fixed_b
-    PifPafDijkstra.pif_fixed_scale = args.pif_fixed_scale
-    PifPafDijkstra.paf_th = args.paf_th
-    PifPafDijkstra.connection_method = args.connection_method
-    PifPafDijkstra.force_complete = args.force_complete_pose
+    PifPafDijkstra.fixed_b = args.fixed_b  # Test: None
+    PifPafDijkstra.pif_fixed_scale = args.pif_fixed_scale  # Test: None
+    PifPafDijkstra.paf_th = args.paf_th  # Test: 0.1
+    PifPafDijkstra.connection_method = args.connection_method  # Test: blend
+    PifPafDijkstra.force_complete = args.force_complete_pose  # Test: True
 
     # configure Pif
-    Pif.pif_fixed_scale = args.pif_fixed_scale
-
-    # configure PifHr
-    PifHr.v_threshold = args.pif_th
+    Pif.pif_fixed_scale = args.pif_fixed_scale  # Test: None
 
     debug_visualizer = None
-    if args.debug_pif_indices or args.debug_paf_indices:
+    if args.debug_pif_indices or args.debug_paf_indices:  #
         debug_visualizer = Visualizer(
             args.debug_pif_indices, args.debug_paf_indices,
             file_prefix=args.debug_file_prefix,
@@ -101,8 +94,8 @@ def factory_from_args(args, model, device=None):
         )
 
     # default value for keypoint filter depends on whether complete pose is forced
-    if args.keypoint_threshold is None:
-        args.keypoint_threshold = 0.001 if not args.force_complete_pose else 0.0
+    if args.keypoint_threshold is None:  # <-
+        args.keypoint_threshold = 0.001 if not args.force_complete_pose else 0.0  # <- 0.0
 
     # decoder workers
     if args.decoder_workers is None and \
@@ -111,18 +104,18 @@ def factory_from_args(args, model, device=None):
         args.decoder_workers = args.batch_size
 
     decode = factory_decode(model,
-                            experimental=args.experimental_decoder,
-                            seed_threshold=args.seed_threshold,
-                            extra_coupling=args.extra_coupling,
-                            multi_scale=args.multi_scale,
-                            multi_scale_hflip=args.multi_scale_hflip,
+                            experimental=args.experimental_decoder,  # Test: False
+                            seed_threshold=args.seed_threshold,  # Test: 0.2
+                            extra_coupling=args.extra_coupling,  # Test: 0.0
+                            multi_scale=args.multi_scale,  # TOCHECK: Test: False
+                            multi_scale_hflip=args.multi_scale_hflip,  # Test: True
                             debug_visualizer=debug_visualizer)
 
     return Processor(model, decode,
-                     instance_threshold=args.instance_threshold,
-                     keypoint_threshold=args.keypoint_threshold,
+                     instance_threshold=args.instance_threshold,  # Test: 0.0
+                     keypoint_threshold=args.keypoint_threshold,  # Test: 0.0
                      debug_visualizer=debug_visualizer,
-                     profile=args.profile_decoder,
+                     profile=args.profile_decoder,  # TOCHECK: how to profile
                      worker_pool=args.decoder_workers,
                      device=device)
 
@@ -134,7 +127,7 @@ def factory_decode(model, *,
                    multi_scale_hflip=True,
                    **kwargs):
     """Instantiate a decoder."""
-
+    # TOCHECK: official model: (pif, paf, paf25)
     head_names = (
         tuple(model.head_names)
         if hasattr(model, 'head_names')
@@ -155,7 +148,7 @@ def factory_decode(model, *,
                       **kwargs)
 
     if head_names in (('pif', 'paf', 'paf25'),):
-        stride = model.head_strides[-1]
+        stride = model.head_strides[-1]  # [8, 8, 8] -> 8
         pif_index = 0
         paf_index = 1
         pif_min_scale = 0.0
@@ -188,7 +181,7 @@ def factory_decode(model, *,
             paf_max_distance = [160.0, 240.0, 320.0, 480.0, None]
             # paf_max_distance = [128.0, 192.0, 256.0, 384.0, None]
 
-        if experimental:
+        if experimental:  # TOCHECK:
             LOG.warning('using experimental decoder')
             confidence_scales = (
                 [1.0 for _ in COCO_PERSON_SKELETON] +
@@ -209,11 +202,11 @@ def factory_decode(model, *,
 
         return PifPaf(
             stride,
-            pif_index=pif_index,
-            paf_index=paf_index,
-            pif_min_scale=pif_min_scale,
-            paf_min_distance=paf_min_distance,
-            paf_max_distance=paf_max_distance,
+            pif_index=pif_index,  # Test: 0
+            paf_index=paf_index,  # Test: 1
+            pif_min_scale=pif_min_scale,  # Test: 0.0
+            paf_min_distance=paf_min_distance,  # Test: 0.0
+            paf_max_distance=paf_max_distance,  # Test: None
             keypoints=COCO_KEYPOINTS,
             skeleton=COCO_PERSON_SKELETON,
             **kwargs

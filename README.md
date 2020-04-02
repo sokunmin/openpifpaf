@@ -1,8 +1,6 @@
 # openpifpaf
 
-Continuously tested on Linux, MacOS and Windows: [![Build Status](https://travis-ci.org/vita-epfl/openpifpaf.svg?branch=master)](https://travis-ci.org/vita-epfl/openpifpaf)<br />
-[CVPR 2019 paper](http://openaccess.thecvf.com/content_CVPR_2019/html/Kreiss_PifPaf_Composite_Fields_for_Human_Pose_Estimation_CVPR_2019_paper.html),
-[arxiv.org/abs/1903.06593](https://arxiv.org/abs/1903.06593)
+Continuously tested on Linux, MacOS and Windows: [![Build Status](https://travis-ci.org/vita-epfl/openpifpaf.svg?branch=master)](https://travis-ci.org/vita-epfl/openpifpaf)
 
 > We propose a new bottom-up method for multi-person 2D human pose
 > estimation that is particularly well suited for urban mobility such as self-driving cars
@@ -18,6 +16,20 @@ Continuously tested on Linux, MacOS and Windows: [![Build Status](https://travis
 > state-of-the-art bottom-up method on the standard COCO keypoint task
 > and produce state-of-the-art results on a modified COCO keypoint task for
 > the transportation domain.
+
+
+```
+@InProceedings{kreiss2019pifpaf,
+  author = {Kreiss, Sven and Bertoni, Lorenzo and Alahi, Alexandre},
+  title = {PifPaf: Composite Fields for Human Pose Estimation},
+  booktitle = {The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  month = {June},
+  year = {2019}
+}
+```
+
+[CVPR 2019 website](http://openaccess.thecvf.com/content_CVPR_2019/html/Kreiss_PifPaf_Composite_Fields_for_Human_Pose_Estimation_CVPR_2019_paper.html),
+[arxiv.org/abs/1903.06593](https://arxiv.org/abs/1903.06593)
 
 
 # Demo
@@ -80,23 +92,15 @@ Tools to work with models:
 
 # Pre-trained Models
 
-Performance metrics with version 0.10.1 on the COCO val set obtained with a GTX1080Ti:
+Performance metrics with version 0.10.0 on the COCO val set obtained with a GTX1080Ti:
 
 | Backbone               | AP       | APᴹ      | APᴸ      | t_{total} [ms]  | t_{dec} [ms] |
 |-----------------------:|:--------:|:--------:|:--------:|:---------------:|:------------:|
-| [shufflenetv2x2]       | __60.4__ | 55.5     | 67.8     | 56              | 33           |
-| [resnet50]             | __64.4__ | 61.1     | 69.9     | 76              | 32           |
-| [(v0.8) resnext50]     | __63.8__ | 61.1     | 68.1     | 93              | 33           |
-| [resnet101]            | __67.8__ | 63.6     | 74.3     | 97              | 28           |
-| [(v0.8) resnet152]     | __67.8__ | 64.4     | 73.3     | 122             | 30           |
-
-[SHUFFLENETV2X1]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.1.0/shufflenetv2x1-pif-paf-edge401-190705-151607-d9a35d7e.pkl
-[shufflenetv2x2]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.10.0/shufflenetv2x2-pif-paf-paf25-edge401-191010-172527-ef704f06.pkl
-[resnet18]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.10.1/resnet18-pif-paf-paf25-edge401-191022-210137-84326f0f.pkl
-[resnet50]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.10.0/resnet50-pif-paf-paf25-edge401-191016-192503-d2b85396.pkl
-[(v0.8) resnext50]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.1.0/resnext50block5-pif-paf-edge401-190629-151121-24491655.pkl
-[resnet101]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.10.0/resnet101block5-pif-paf-paf25-edge401-191012-132602-a2bf7ecd.pkl
-[(v0.8) resnet152]: https://github.com/vita-epfl/openpifpaf-torchhub/releases/download/v0.1.0/resnet152block5-pif-paf-edge401-190625-185426-3e2f28ed.pkl
+| shufflenetv2x2         | __60.4__ | 55.3     | 68.1     | 80              | 56           |
+| resnet50               | __64.6__ | 61.1     | 70.2     | 100             | 55           |
+| (v0.8) resnext50       | __63.8__ | 61.1     | 68.1     | 93              | 33           |
+| resnet101              | __67.9__ | 63.6     | 74.7     | 120             | 51           |
+| (v0.8) resnet152       | __67.8__ | 64.4     | 73.3     | 122             | 30           |
 
 Pretrained model files are shared in the releases of the
 __[openpifpaf-torchhub](https://github.com/vita-epfl/openpifpaf-torchhub)__
@@ -134,6 +138,7 @@ time CUDA_VISIBLE_DEVICES=0,1 python3 -m openpifpaf.train \
   --head-quad=1 \
   --headnets pif paf paf25 \
   --square-edge=401 \
+  --regression-loss=laplace \
   --lambdas 10 1 1 15 1 1 15 1 1
 ```
 
@@ -212,19 +217,6 @@ In this process, ffmpeg scales the video to `641px` which can be adjusted.
 
 * [monoloco](https://github.com/vita-epfl/monoloco): "Monocular 3D Pedestrian Localization and Uncertainty Estimation" which uses OpenPifPaf for poses.
 * [openpifpafwebdemo](https://github.com/vita-epfl/openpifpafwebdemo): web front-end.
-
-
-# Citation
-
-```
-@InProceedings{kreiss2019pifpaf,
-  author = {Kreiss, Sven and Bertoni, Lorenzo and Alahi, Alexandre},
-  title = {PifPaf: Composite Fields for Human Pose Estimation},
-  booktitle = {The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
-  month = {June},
-  year = {2019}
-}
-```
 
 
 [CC-BY-2.0]: https://creativecommons.org/licenses/by/2.0/

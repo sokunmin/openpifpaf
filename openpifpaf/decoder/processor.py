@@ -32,14 +32,13 @@ class Processor(object):
                  profile=None,
                  device=None,
                  worker_pool=None,
-                 suppressed_v=0.0,
                  instance_scorer=None):
         if profile is True:
             profile = cProfile.Profile()
 
         if worker_pool is None or worker_pool == 0:
             worker_pool = DummyPool
-        if isinstance(worker_pool, int):
+        if isinstance(worker_pool, int):  # TOCHECK: how to work w/ pool?
             LOG.info('creating decoder worker pool with %d workers', worker_pool)
             worker_pool = multiprocessing.Pool(worker_pool)
 
@@ -52,7 +51,6 @@ class Processor(object):
         self.profile = profile
         self.device = device
         self.worker_pool = worker_pool
-        self.suppressed_v = suppressed_v
         self.instance_scorer = instance_scorer
 
     def __getstate__(self):
@@ -79,7 +77,7 @@ class Processor(object):
             # index by batch entry
             fields = [
                 [[field[i] for field in head] for head in fields]
-                for i in range(image_batch.shape[0])
+                for i in range(image_batch.shape[0])  # >TOCHECK: (#img, C, edge_H, edge_W) -> enlarging batch size
             ]
 
         LOG.debug('nn processing time: %.3fs', time.time() - start)
@@ -108,7 +106,7 @@ class Processor(object):
                     continue
 
                 if scalar_nonzero_clipped(occ, xyv[0], xyv[1]):
-                    xyv[2] = self.suppressed_v
+                    xyv[2] = 0.0
                 else:
                     scalar_square_add_single(occ, xyv[0], xyv[1], joint_s, 1)
 
@@ -117,7 +115,7 @@ class Processor(object):
             self.debug_visualizer.occupied(occupied[0])
             self.debug_visualizer.occupied(occupied[4])
 
-        annotations = [ann for ann in annotations if np.any(ann.data[:, 2] > self.suppressed_v)]
+        annotations = [ann for ann in annotations if np.any(ann.data[:, 2] > 0.0)]
         annotations = sorted(annotations, key=lambda a: -a.score())
         return annotations
 
@@ -152,21 +150,22 @@ class Processor(object):
     def _mappable_annotations(self, fields, meta, debug_image):
         return self.annotations(fields, meta=meta, debug_image=debug_image)
 
-    def suppress_outside_valid(self, ann, valid_area):
+    @staticmethod
+    def suppress_outside_valid(ann, valid_area):
         m = np.logical_or(
             np.logical_or(ann.data[:, 0] < valid_area[0],
                           ann.data[:, 0] > valid_area[0] + valid_area[2]),
             np.logical_or(ann.data[:, 1] < valid_area[1],
                           ann.data[:, 1] > valid_area[1] + valid_area[3]),
         )
-        ann.data[m, 2] = np.maximum(ann.data[m, 2], self.suppressed_v)
+        ann.data[m, 2] = np.maximum(ann.data[m, 2], 0.0)
 
     def annotations(self, fields, *, initial_annotations=None, meta=None, debug_image=None):
         start = time.time()
         if self.profile is not None:
             self.profile.enable()
 
-        if debug_image is not None:
+        if debug_image is not None:  # TOCHECK: how to use `debug_image`?
             self.set_cpu_image(None, debug_image)
 
         annotations = self.decode(fields, initial_annotations=initial_annotations)
@@ -182,11 +181,11 @@ class Processor(object):
         # threshold
         for ann in annotations:
             if meta is not None:
-                self.suppress_outside_valid(ann, meta['valid_area'])
+                self.suppress_outside_valid(ann, meta['valid_area'])  # TOCHECK:
             kps = ann.data
             kps[kps[:, 2] < self.keypoint_threshold] = 0.0
         annotations = [ann for ann in annotations
-                       if ann.score() >= self.instance_threshold]
+                       if ann.score() >= self.instance_threshold]  # score > 0.0
         annotations = sorted(annotations, key=lambda a: -a.score())
 
         if self.profile is not None:

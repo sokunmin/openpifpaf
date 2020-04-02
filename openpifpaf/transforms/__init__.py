@@ -18,7 +18,6 @@ from .hflip import HFlip, HorizontalSwap
 from .image import Blur, ImageTransform, JpegCompression
 from .multi_scale import MultiScale
 from .pad import CenterPad, SquarePad
-from .preprocess import Preprocess
 from .random import RandomApply
 from .rotate import RotateBy90
 from .scale import RescaleAbsolute, RescaleRelative
@@ -36,7 +35,7 @@ EVAL_TRANSFORM = Compose([
 
 TRAIN_TRANSFORM = Compose([
     NormalizeAnnotations(),
-    ImageTransform(torchvision.transforms.ColorJitter(
+    ImageTransform(torchvision.transforms.ColorJitter(  # torchvision API
         brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1)),
     RandomApply(JpegCompression(), 0.1),  # maybe irrelevant for COCO, but good for others
     # RandomApply(Blur(), 0.01),  # maybe irrelevant for COCO, but good for others

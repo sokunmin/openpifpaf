@@ -1,5 +1,6 @@
 # cython: infer_types=True
 cimport cython
+from cython.parallel import prange  # TODO: verify speedup
 from libc.math cimport exp, fabs, sqrt, fmin, fmax
 import numpy as np
 
@@ -11,11 +12,11 @@ cpdef void scalar_square_add_constant(float[:, :] field, float[:] x, float[:] y,
     cdef Py_ssize_t i, xx, yy
     cdef float cx, cy, cv, cwidth
 
-    for i in range(x.shape[0]):
+    for i in prange(x.shape[0]):
         cx = x[i]
         cy = y[i]
-        cv = v[i]
-        cwidth = width[i]
+        cv = v[i]  # > (v / 16 / #pifs)
+        cwidth = width[i]  # scale
 
         minx = (<long>clip(cx - cwidth, 0, field.shape[1] - 1))
         maxx = (<long>clip(cx + cwidth, minx + 1, field.shape[1]))
@@ -34,15 +35,15 @@ cpdef void cumulative_average(float[:, :] cuma, float[:, :] cumw, float[:] x, fl
     cdef float cv, cw, cx, cy, cwidth
     cdef Py_ssize_t i, xx, yy
 
-    for i in range(x.shape[0]):
-        cw = w[i]
+    for i in prange(x.shape[0]):  # > #pos
+        cw = w[i]  # p_c
         if cw <= 0.0:
             continue
 
-        cv = v[i]
+        cv = v[i]  # p_σ
         cx = x[i]
         cy = y[i]
-        cwidth = width[i]
+        cwidth = width[i]  # p_σ
 
         minx = (<long>clip(cx - cwidth, 0, cuma.shape[1] - 1))
         maxx = (<long>clip(cx + cwidth, minx + 1, cuma.shape[1]))
@@ -50,7 +51,9 @@ cpdef void cumulative_average(float[:, :] cuma, float[:, :] cumw, float[:] x, fl
         maxy = (<long>clip(cy + cwidth, miny + 1, cuma.shape[0]))
         for xx in range(minx, maxx):
             for yy in range(miny, maxy):
+                # TOCHECK: (v * scale + scales[yy,xx] * scales_n[yy,xx]) / (scales[yy,xx] + v)
                 cuma[yy, xx] = (cw * cv + cumw[yy, xx] * cuma[yy, xx]) / (cumw[yy, xx] + cw)
+                # TOCHECK:
                 cumw[yy, xx] += cw
 
 
@@ -77,9 +80,9 @@ cpdef void scalar_square_add_gauss(float[:, :] field, float[:] x, float[:] y, fl
     cdef float cv, cx, cy, csigma, csigma2
     cdef long minx, miny, maxx, maxy
 
-    for i in range(x.shape[0]):
-        csigma = sigma[i]
-        csigma2 = csigma * csigma
+    for i in prange(x.shape[0]):  # > #pos
+        csigma = sigma[i]  # scale, max=2.0
+        csigma2 = csigma * csigma  # variance
         cx = x[i]
         cy = y[i]
         cv = v[i]
@@ -94,35 +97,6 @@ cpdef void scalar_square_add_gauss(float[:, :] field, float[:] x, float[:] y, fl
                 deltay2 = (yy - cy)**2
                 vv = cv * approx_exp(-0.5 * (deltax2 + deltay2) / csigma2)
                 field[yy, xx] += vv
-
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
-cpdef void scalar_square_add_gauss_with_max(float[:, :] field, float[:] x, float[:] y, float[:] sigma, float[:] v, float truncate=2.0, float max_value=1.0) nogil:
-    cdef Py_ssize_t i, xx, yy
-    cdef float vv, deltax2, deltay2
-    cdef float cv, cx, cy, csigma, csigma2
-    cdef long minx, miny, maxx, maxy
-
-    for i in range(x.shape[0]):
-        csigma = sigma[i]
-        csigma2 = csigma * csigma
-        cx = x[i]
-        cy = y[i]
-        cv = v[i]
-
-        minx = (<long>clip(cx - truncate * csigma, 0, field.shape[1] - 1))
-        maxx = (<long>clip(cx + truncate * csigma, minx + 1, field.shape[1]))
-        miny = (<long>clip(cy - truncate * csigma, 0, field.shape[0] - 1))
-        maxy = (<long>clip(cy + truncate * csigma, miny + 1, field.shape[0]))
-        for xx in range(minx, maxx):
-            deltax2 = (xx - cx)**2
-            for yy in range(miny, maxy):
-                deltay2 = (yy - cy)**2
-                vv = cv * approx_exp(-0.5 * (deltax2 + deltay2) / csigma2)
-                field[yy, xx] += vv
-                field[yy, xx] = min(max_value, field[yy, xx])
 
 
 @cython.boundscheck(False)
@@ -134,7 +108,7 @@ cpdef void scalar_square_max_gauss(float[:, :] field, float[:] x, float[:] y, fl
     cdef float cv, cx, cy, csigma, csigma2
     cdef long minx, miny, maxx, maxy
 
-    for i in range(x.shape[0]):
+    for i in prange(x.shape[0]):
         csigma = sigma[i]
         csigma2 = csigma * csigma
         cx = x[i]
@@ -217,12 +191,12 @@ def paf_mask_center(float[:, :] paf_field, float x, float y, float sigma=1.0):
 def scalar_values(float[:, :] field, float[:] x, float[:] y, float default=-1):
     values_np = np.full((x.shape[0],), default, dtype=np.float32)
     cdef float[:] values = values_np
-    cdef float maxx = <float>field.shape[1] - 1, maxy = <float>field.shape[0] - 1
+    cdef float maxx = <float>field.shape[1] - 1, maxy = <float>field.shape[0] - 1  # (edgeH-1, edgeW-1)
 
-    for i in range(values.shape[0]):
+    for i in range(values.shape[0]):  # > (#pos,)
         if x[i] < 0.0 or y[i] < 0.0 or x[i] > maxx or y[i] > maxy:
             continue
-
+        # > convert `reg_xy coords(float)` to `pixel location(np.intp)`
         values[i] = field[<Py_ssize_t>y[i], <Py_ssize_t>x[i]]
 
     return values_np

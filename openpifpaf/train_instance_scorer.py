@@ -4,8 +4,8 @@ import random
 import pysparkling
 import torch
 
-from .decoder.instance_scorer import InstanceScorer
-from . import show
+from openpifpaf.decoder.instance_scorer import InstanceScorer
+from openpifpaf import show
 
 DATA_FILE = ('outputs/resnet101block5-pif-paf-edge401-190412-151013.pkl'
              '.decodertraindata-edge641-samples0.json')

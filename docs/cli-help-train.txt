@@ -54,7 +54,7 @@ optional arguments:
                         update batch norm running statistics (default: False)
   --square-edge SQUARE_EDGE
                         square edge of input images (default: 401)
-  --ema EMA             ema decay constant (default: 0.001)
+  --ema EMA             Exponential Moving Average (EMA). ema decay constant (default: 0.001)
   --disable-cuda        disable CUDA (default: False)
   --no-augmentation     do not apply data augmentation (default: True)
 

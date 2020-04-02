@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import torch
 
-from . import datasets, transforms
+from openpifpaf import datasets, transforms
 
 ANNOTATIONS = 'data-mscoco/annotations/person_keypoints_val2017.json'
 IMAGE_DIR = 'data-mscoco/images/val2017/'

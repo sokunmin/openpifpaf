@@ -1,0 +1,121 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title Training pipeline
+
+[-> train : run
+activate train
+train -> train : parse args
+
+== init encoder ==
+
+train -> encoder : encoder.factory(args, net)
+activate encoder
+encoder -> encoder : configure \n<b>Pif</b> & <b>Paf</b> heads
+activate encoder
+create "encoder:Pif"
+encoder --> "encoder:Pif" : <<init>>\n(stride, n_keypoints)
+activate "encoder:Pif"
+create "encoder:Paf"
+encoder --> "encoder:Paf" : <<init>>\n(stride, n_keypoints, skeleton)
+activate "encoder:Paf"
+encoder --> train : target_transforms
+deactivate encoder
+deactivate encoder
+
+== init augmentation ==
+
+train -> transforms
+activate transforms
+
+train -> train
+activate train
+
+== in train.py ==
+
+create NormalizeAnnotation
+train --> NormalizeAnnotation : <<init>>
+activate NormalizeAnnotation
+
+create AnnotationJitter
+train --> AnnotationJitter : <<init>>
+activate AnnotationJitter
+
+create "HFlip:RandomApply"
+train --> "HFlip:RandomApply" : <<init>>
+activate "HFlip:RandomApply"
+
+create RescaleRelative
+train --> RescaleRelative : <<init>>(args)
+activate RescaleRelative
+
+create Crop
+train --> Crop : <<init>>(args)
+activate Crop
+
+create CenterPad
+train --> CenterPad : <<init>>(args)
+activate CenterPad
+
+== TRAIN_TRANSFORM in transforms.py ==
+
+create NormalizeAnnotations
+transforms --> NormalizeAnnotations : <<init>>
+activate NormalizeAnnotations
+
+create ColorJitter
+transforms --> ColorJitter : <<init>>(args)
+activate ColorJitter
+
+create JpegCompression
+transforms --> JpegCompression : <<init>>
+activate JpegCompression
+
+create RandomGrayscale
+transforms --> RandomGrayscale : <<init>>
+activate RandomGrayscale
+
+== EVAL_TRANSFORM in transforms.py ==
+
+create NormalizeAnnotations
+transforms --> NormalizeAnnotations : <<init>>
+activate NormalizeAnnotations
+
+create ToTensor
+transforms --> ToTensor : <<init>>
+activate ToTensor
+
+create Normalize
+transforms --> Normalize : <<init>>
+activate Normalize
+
+create "preprocess:Compose"
+transforms -> "preprocess:Compose" : <<init>>\n(preprocess_transformations)
+activate "preprocess:Compose"
+transforms -> train : preprocess
+deactivate transforms
+deactivate train
+
+deactivate train
+deactivate "encoder:Pif"
+deactivate "encoder:Paf"
+
+deactivate NormalizeAnnotation
+deactivate AnnotationJitter
+deactivate "HFlip:RandomApply"
+deactivate RescaleRelative
+deactivate Crop
+deactivate CenterPad
+
+deactivate NormalizeAnnotations
+deactivate ColorJitter
+deactivate JpegCompression
+deactivate RandomGrayscale
+
+deactivate NormalizeAnnotations
+deactivate ToTensor
+deactivate Normalize
+deactivate "preprocess:Compose"
+[<- train : done
+@enduml

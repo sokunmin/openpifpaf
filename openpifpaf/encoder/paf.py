@@ -4,7 +4,6 @@ import scipy
 import torch
 
 from .annrescaler import AnnRescaler
-from .pif import scale_from_keypoints
 from ..utils import create_sink, mask_valid_area
 
 LOG = logging.getLogger(__name__)
@@ -15,12 +14,11 @@ class Paf(object):
     fixed_size = False
     aspect_ratio = 0.0
 
-    def __init__(self, stride, *, n_keypoints, skeleton, sigmas, v_threshold=0):
-        self.stride = stride
-        self.n_keypoints = n_keypoints
+    def __init__(self, stride, *, n_keypoints, skeleton, v_threshold=0):
+        self.stride = stride  # 8
+        self.n_keypoints = n_keypoints  # 17
         self.skeleton = skeleton
-        self.sigmas = sigmas
-        self.v_threshold = v_threshold
+        self.v_threshold = v_threshold  # 0
 
         if self.fixed_size:
             assert self.aspect_ratio == 0.0
@@ -32,44 +30,49 @@ class Paf(object):
 
         f = PafGenerator(self.min_size, self.skeleton,
                          v_threshold=self.v_threshold,
-                         fixed_size=self.fixed_size,
-                         aspect_ratio=self.aspect_ratio,
-                         sigmas=self.sigmas)
+                         fixed_size=self.fixed_size, aspect_ratio=self.aspect_ratio)
         f.init_fields(bg_mask)
         f.fill(keypoint_sets)
         return f.fields(valid_area)
 
 
+# SEE: 3.3 Part Association Fields
+#   written as a^(i,j) = {a_c, a_x1, a_y1, a_b1, a_x2, a_y2, a_b2}
+#   components include:
+#   a_c: confidence
+#   a_xy: associated coordinates to two parts, one for closest part, one for farther part.
+#   a_b: width
+#   Two steps to associate connection:
+#    (1) find the closest joint of either of two types which determines one of vector componenets
+#    (2) ground-truth pose determines the other vector component to represent the association.
+#        the second joint can be far away.
 class PafGenerator(object):
     def __init__(self, min_size, skeleton, *,
-                 v_threshold, fixed_size, aspect_ratio, sigmas, padding=10):
+                 v_threshold, fixed_size, aspect_ratio, padding=10):
         self.min_size = min_size
         self.skeleton = skeleton
         self.v_threshold = v_threshold
         self.padding = padding
         self.fixed_size = fixed_size
         self.aspect_ratio = aspect_ratio
-        self.sigmas = sigmas
 
         self.intensities = None
         self.fields_reg1 = None
         self.fields_reg2 = None
-        self.fields_scale1 = None
-        self.fields_scale2 = None
+        self.fields_scale = None
         self.fields_reg_l = None
 
     def init_fields(self, bg_mask):
-        n_fields = len(self.skeleton)
+        n_fields = len(self.skeleton)  # > 19
         field_w = bg_mask.shape[1] + 2 * self.padding
         field_h = bg_mask.shape[0] + 2 * self.padding
-        self.intensities = np.zeros((n_fields + 1, field_h, field_w), dtype=np.float32)
-        self.fields_reg1 = np.zeros((n_fields, 6, field_h, field_w), dtype=np.float32)
-        self.fields_reg2 = np.zeros((n_fields, 6, field_h, field_w), dtype=np.float32)
+        self.intensities = np.zeros((n_fields + 1, field_h, field_w), dtype=np.float32)  # (20, pad_H, pad_W)
+        self.fields_reg1 = np.zeros((n_fields, 6, field_h, field_w), dtype=np.float32)  # (19, 6, pad_H, pad_W)
+        self.fields_reg2 = np.zeros((n_fields, 6, field_h, field_w), dtype=np.float32)  # (19, 6, pad_H, pad_W)
         self.fields_reg1[:, 2:] = np.inf
         self.fields_reg2[:, 2:] = np.inf
-        self.fields_scale1 = np.full((n_fields, field_h, field_w), np.nan, dtype=np.float32)
-        self.fields_scale2 = np.full((n_fields, field_h, field_w), np.nan, dtype=np.float32)
-        self.fields_reg_l = np.full((n_fields, field_h, field_w), np.inf, dtype=np.float32)
+        self.fields_scale = np.zeros((n_fields, field_h, field_w), dtype=np.float32)  # (19, pad_H, pad_W)
+        self.fields_reg_l = np.full((n_fields, field_h, field_w), np.inf, dtype=np.float32)  # (19, pad_H, pad_W)
 
         # set background
         self.intensities[-1] = 1.0
@@ -96,11 +99,16 @@ class PafGenerator(object):
         visible = keypoints[:, 2] > 0
         if not np.any(visible):
             return
-        scale = scale_from_keypoints(keypoints)
 
-        for i, (joint1i, joint2i) in enumerate(self.skeleton):
-            joint1 = keypoints[joint1i - 1]
-            joint2 = keypoints[joint2i - 1]
+        area = (
+            (np.max(keypoints[visible, 0]) - np.min(keypoints[visible, 0])) *
+            (np.max(keypoints[visible, 1]) - np.min(keypoints[visible, 1]))
+        )
+        scale = np.sqrt(area)
+
+        for i, (joint1i, joint2i) in enumerate(self.skeleton):  # > #pairs
+            joint1 = keypoints[joint1i - 1]  # (3,)
+            joint2 = keypoints[joint2i - 1]  # (3,)
             if joint1[2] <= self.v_threshold or joint2[2] <= self.v_threshold:
                 continue
 
@@ -129,21 +137,21 @@ class PafGenerator(object):
 
             max_r1 = np.expand_dims(max_r1, 1)
             max_r2 = np.expand_dims(max_r2, 1)
-            if self.sigmas is None:
-                scale1, scale2 = scale, scale
-            else:
-                scale1 = scale * self.sigmas[joint1i - 1]
-                scale2 = scale * self.sigmas[joint2i - 1]
-            self.fill_association(i, joint1, joint2, scale1, scale2, max_r1, max_r2)
+            self.fill_association(i, joint1, joint2, scale, max_r1, max_r2)
 
-    def fill_association(self, i, joint1, joint2, scale1, scale2, max_r1, max_r2):
+    def fill_association(self, i, joint1, joint2, scale, max_r1, max_r2):
+        """
+        https://github.com/vita-epfl/openpifpaf/issues/17#issuecomment-517946396
+        These are used to create the area that is used as high confidence for PAF connections.
+         It is sampling along the line between two joints and dealing with some corner cases
+          (i.e. joints being very close together).
+        """
         # offset between joints
         offset = joint2[:2] - joint1[:2]
         offset_d = np.linalg.norm(offset)
 
         # dynamically create s
         s = max(self.min_size, int(offset_d * self.aspect_ratio))
-        # s = max(s, min(int(scale1), int(scale2)))
         sink = create_sink(s)
         s_offset = (s - 1.0) / 2.0
 
@@ -163,6 +171,9 @@ class PafGenerator(object):
             fij = np.round(joint1ij + f * offsetij) + self.padding
             fminx, fminy = int(fij[0]), int(fij[1])
             fmaxx, fmaxy = fminx + s, fminy + s
+            # > TOCHECK: `fields_reg_l` is probably used to have some policy for
+            #  when the same point is inside the sink of 2 different interations
+            # The policy is to give priority to the closest joint.
             if fminx < 0 or fmaxx > self.intensities.shape[2] or \
                fminy < 0 or fmaxy > self.intensities.shape[1]:
                 continue
@@ -190,16 +201,13 @@ class PafGenerator(object):
             self.fields_reg_l[i, fminy:fmaxy, fminx:fmaxx][mask] = sink_l[mask]
 
             # update scale
-            self.fields_scale1[i, fminy:fmaxy, fminx:fmaxx][mask] = scale1
-            self.fields_scale2[i, fminy:fmaxy, fminx:fmaxx][mask] = scale2
+            self.fields_scale[i, fminy:fmaxy, fminx:fmaxx][mask] = scale
 
     def fields(self, valid_area):
-        p = self.padding
-        intensities = self.intensities[:, p:-p, p:-p]
-        fields_reg1 = self.fields_reg1[:, :, p:-p, p:-p]
-        fields_reg2 = self.fields_reg2[:, :, p:-p, p:-p]
-        fields_scale1 = self.fields_scale1[:, p:-p, p:-p]
-        fields_scale2 = self.fields_scale2[:, p:-p, p:-p]
+        intensities = self.intensities[:, self.padding:-self.padding, self.padding:-self.padding]
+        fields_reg1 = self.fields_reg1[:, :, self.padding:-self.padding, self.padding:-self.padding]
+        fields_reg2 = self.fields_reg2[:, :, self.padding:-self.padding, self.padding:-self.padding]
+        fields_scale = self.fields_scale[:, self.padding:-self.padding, self.padding:-self.padding]
 
         mask_valid_area(intensities, valid_area)
 
@@ -207,6 +215,5 @@ class PafGenerator(object):
             torch.from_numpy(intensities),
             torch.from_numpy(fields_reg1),
             torch.from_numpy(fields_reg2),
-            torch.from_numpy(fields_scale1),
-            torch.from_numpy(fields_scale2),
+            torch.from_numpy(fields_scale),
         )

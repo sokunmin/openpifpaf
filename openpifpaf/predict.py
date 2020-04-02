@@ -10,8 +10,8 @@ import numpy as np
 import PIL
 import torch
 
-from .network import nets
-from . import datasets, decoder, show, transforms
+from openpifpaf.network import nets
+from openpifpaf import datasets, decoder, show, transforms
 
 LOG = logging.getLogger(__name__)
 
@@ -61,9 +61,8 @@ def cli():
         log_level = logging.WARNING
     if args.debug:
         log_level = logging.DEBUG
-    logging.basicConfig()
-    logging.getLogger('openpifpaf').setLevel(log_level)
-    LOG.setLevel(log_level)
+    logging.basicConfig(level=log_level)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
     if args.loader_workers is None:
         args.loader_workers = args.batch_size
@@ -123,16 +122,11 @@ def main():
         collate_fn=datasets.collate_images_anns_meta)
 
     # visualizers
-    keypoint_painter = show.KeypointPainter(
-        show_box=args.debug,
-        show_joint_scale=args.debug,
-    )
+    keypoint_painter = show.KeypointPainter()
     skeleton_painter = show.KeypointPainter(
         color_connections=True,
         markersize=args.line_width - 5,
         linewidth=args.line_width,
-        show_box=args.debug,
-        show_joint_scale=args.debug,
     )
 
     for batch_i, (image_tensors_batch, _, meta_batch) in enumerate(data_loader):

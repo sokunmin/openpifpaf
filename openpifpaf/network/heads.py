@@ -128,23 +128,23 @@ class CompositeField(torch.nn.Module):
 
         self.dropout = torch.nn.Dropout2d(p=self.dropout_p)
         self._quad = self.quad
-
-        # classification
+        # See `heads.py`->`factory()`, `in_features`=2048(ResNet50)
+        # classification: `n_fields`: PIF:=17, PAF=19
         out_features = n_fields * (4 ** self._quad)
         self.class_convs = torch.nn.ModuleList([
             torch.nn.Conv2d(in_features, out_features,
-                            kernel_size, padding=padding, dilation=dilation)
-            for _ in range(n_confidences)
+                            kernel_size, padding=padding, dilation=dilation)  # 1x1 conv + dilation=1
+            for _ in range(n_confidences)  # `n_confidences`=1
         ])
 
         # regression
         self.reg_convs = torch.nn.ModuleList([
-            torch.nn.Conv2d(in_features, 2 * out_features,
+            torch.nn.Conv2d(in_features, 2 * out_features,  # -> (x,y) x (17 x 4)
                             kernel_size, padding=padding, dilation=dilation)
-            for _ in range(n_vectors)
+            for _ in range(n_vectors)  # `n_vectors`: PIF=1, PAF=2
         ])
         self.reg_spreads = torch.nn.ModuleList([
-            torch.nn.Conv2d(in_features, out_features,
+            torch.nn.Conv2d(in_features, out_features,  # -> `n_fields`=17 x 4 = 68
                             kernel_size, padding=padding, dilation=dilation)
             for _ in self.reg_convs
         ])
@@ -153,64 +153,64 @@ class CompositeField(torch.nn.Module):
         self.scale_convs = torch.nn.ModuleList([
             torch.nn.Conv2d(in_features, out_features,
                             kernel_size, padding=padding, dilation=dilation)
-            for _ in range(n_scales)
+            for _ in range(n_scales)  # `n_scales`, PIF=1, PAF=0
         ])
 
         # dequad
         self.dequad_op = torch.nn.PixelShuffle(2)
 
     def forward(self, x):  # pylint: disable=arguments-differ
-        x = self.dropout(x)
+        x = self.dropout(x)  # > (#img, C, H, W)
 
-        # classification
-        classes_x = [class_conv(x) for class_conv in self.class_convs]
-        if not self.training:
+        # classification: PIF=4x17, PAF=4x19
+        classes_x = [class_conv(x) for class_conv in self.class_convs]  # (#img, (PIF=4x17, PAF=4x19), feat_H, feat_W)
+        if not self.training:  # <- Test
             classes_x = [torch.sigmoid(class_x) for class_x in classes_x]
 
-        # regressions
-        regs_x = [reg_conv(x) * self.dilation for reg_conv in self.reg_convs]
-        regs_x_spread = [reg_spread(x) for reg_spread in self.reg_spreads]
-        regs_x_spread = [torch.nn.functional.leaky_relu(x + 2.0) - 2.0
+        # regressions, `dilation`=1
+        regs_x = [reg_conv(x) * self.dilation for reg_conv in self.reg_convs]  # (#img, (PIF=2x4x17, PAF=2x4x19), feat_H, feat_W)
+        regs_x_spread = [reg_spread(x) for reg_spread in self.reg_spreads]  # (#img, (PIF=4x17, PAF=4x19), feat_H, feat_W)
+        regs_x_spread = [torch.nn.functional.leaky_relu(x + 2.0) - 2.0  # TOCHECK: why use `leaky_relu(x+2)-2` here?
                          for x in regs_x_spread]
 
         # scale
-        scales_x = [scale_conv(x) for scale_conv in self.scale_convs]
+        scales_x = [scale_conv(x) for scale_conv in self.scale_convs]  # (#img, (PIF=4x17, PAF=4x19), feat_H, feat_W)
         scales_x = [torch.nn.functional.relu(scale_x) for scale_x in scales_x]
 
-        # upscale
+        # upscale: `_quad`: the times to upsample
         for _ in range(self._quad):
             classes_x = [self.dequad_op(class_x)[:, :, :-1, :-1]
-                         for class_x in classes_x]
+                         for class_x in classes_x]  # (#head, #img, 17, feat_H x 2 -1, feat_W x 2 -1)
             regs_x = [self.dequad_op(reg_x)[:, :, :-1, :-1]
-                      for reg_x in regs_x]
+                      for reg_x in regs_x]  # (#head, #img, 34, feat_H x 2 -1, feat_W x 2 -1)
             regs_x_spread = [self.dequad_op(reg_x_spread)[:, :, :-1, :-1]
-                             for reg_x_spread in regs_x_spread]
-            scales_x = [self.dequad_op(scale_x)[:, :, :-1, :-1]
+                             for reg_x_spread in regs_x_spread]  # (#head, #img, 17, feat_H x 2 -1, feat_W x 2 -1)
+            scales_x = [self.dequad_op(scale_x)[:, :, :-1, :-1]  # (#head, #img, 17, feat_H x 2 -1, feat_W x 2 -1)
                         for scale_x in scales_x]
 
         # reshape regressions
         regs_x = [
-            reg_x.reshape(reg_x.shape[0],
-                          reg_x.shape[1] // 2,
+            reg_x.reshape(reg_x.shape[0],  # > #img
+                          reg_x.shape[1] // 2,  # > 34 // 2 -> 17
                           2,
-                          reg_x.shape[2],
-                          reg_x.shape[3])
+                          reg_x.shape[2],  # > up_H: feat_H x 2 - 1
+                          reg_x.shape[3])  # > up_W: feat_H x 2 - 1
             for reg_x in regs_x
-        ]
+        ]  # (#img, 17, 2, up_H, up_W)
 
         return classes_x + regs_x + regs_x_spread + scales_x
 
 
 def determine_nfields(head_name):
-    m = re.match('p[ia]f[s]?([0-9]+)$', head_name)
+    m = re.match('p[ia]f([0-9]+)$', head_name)
     if m is not None:
         return int(m.group(1))
 
     return {
         'paf': 19,
-        'pafs': 19,
         'pafb': 19,
         'pafsb': 19,
+        'pafs19': 19,
         'wpaf': 19,
     }.get(head_name, 17)
 
@@ -226,8 +226,6 @@ def determine_nvectors(head_name):
 def determine_nscales(head_name):
     if 'pif' in head_name:
         return 1
-    if 'pafs' in head_name:
-        return 2
     if 'paf' in head_name:
         return 0
     return 0
@@ -239,8 +237,9 @@ def factory(name, n_features):
                 'pafs',
                 'wpaf',
                 'pafb',
+                'pafs19',
                 'pafsb') or \
-       re.match('p[ia]f[s]?([0-9]+)$', name) is not None:
+       re.match('p[ia]f([0-9]+)$', name) is not None:
         n_fields = determine_nfields(name)
         n_vectors = determine_nvectors(name)
         n_scales = determine_nscales(name)

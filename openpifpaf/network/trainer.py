@@ -31,7 +31,7 @@ class Trainer(object):
         self.device = device
         self.fix_batch_norm = fix_batch_norm
         self.stride_apply = stride_apply
-
+        # > TOCHECK: what is `ema`
         self.ema_decay = ema_decay
         self.ema = None
         self.ema_restore_params = None
@@ -39,8 +39,8 @@ class Trainer(object):
         self.encoder_visualizer = encoder_visualizer
         self.model_meta_data = model_meta_data
 
-        if train_profile:
-            # monkey patch to profile self.train_batch()
+        if train_profile:  # TOCHECK: how to profile
+            # `monkey patch` to profile self.train_batch()
             self.trace_counter = 0
             self.train_batch_without_profile = self.train_batch
             def train_batch_with_profile(*args, **kwargs):
@@ -57,7 +57,7 @@ class Trainer(object):
 
         LOG.info({
             'type': 'config',
-            'field_names': self.loss.field_names,
+            'field_names': self.loss.field_names,   # [pif.c, pif.vec1, pif.scales1, paf.c, paf.vec1, paf.vec2]
         })
 
     def lr(self):
@@ -71,7 +71,7 @@ class Trainer(object):
         for p, ema_p in zip(self.model.parameters(), self.ema):
             ema_p.mul_(1.0 - self.ema_decay).add_(self.ema_decay, p.data)
 
-    def apply_ema(self):
+    def apply_ema(self):  # Exponential Moving Average
         if self.ema is None:
             return
 
@@ -104,20 +104,28 @@ class Trainer(object):
     def train_batch(self, data, targets, meta, apply_gradients=True):  # pylint: disable=method-hidden
         if self.encoder_visualizer:
             self.encoder_visualizer(data, targets, meta)
-
+        # <PIF>
+        #   [0]: (#obj, 18, H/stride, W/stride)
+        #   [1]: (#obj, 17, 6, H/stride, W/stride)
+        #   [2]: (#obj, 17, H/stride, W/stride)
+        # <PAF>
+        #   [0]: (#obj, 20, H/stride, W/stride)
+        #   [1]: (#obj, 19, 6, H/stride, W/stride)
+        #   [2]: (#obj, 19, 6, H/stride, W/stride)
+        #   [3]: (#obj, 19, H/stride, W/stride)
         if self.device:
             data = data.to(self.device, non_blocking=True)
             targets = [[t.to(self.device, non_blocking=True) for t in head] for head in targets]
 
         # train encoder
         with torch.autograd.profiler.record_function('model'):
-            outputs = self.model(data)
+            outputs = self.model(data)  # > input: (#obj, C, H, W)
         with torch.autograd.profiler.record_function('loss'):
             loss, head_losses = self.loss(outputs, targets)
         if loss is not None:
             with torch.autograd.profiler.record_function('backward'):
                 loss.backward()
-        if apply_gradients:
+        if apply_gradients:  # <-
             with torch.autograd.profiler.record_function('step'):
                 self.optimizer.step()
                 self.optimizer.zero_grad()

@@ -65,10 +65,10 @@ def factory_optimizer(args, parameters):
             (p for p in parameters if p.requires_grad),
             lr=args.lr, betas=(args.momentum, args.beta2),
             weight_decay=args.weight_decay, eps=args.adam_eps, amsgrad=args.amsgrad)
-    else:
+    else:  # <-
         LOG.info('SGD optimizer')
         optimizer = torch.optim.SGD(
-            (p for p in parameters if p.requires_grad),
+            (p for p in parameters if p.requires_grad),  # > pass model parameters to optimizer
             lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay,
             nesterov=args.nesterov)
 
@@ -78,8 +78,8 @@ def factory_optimizer(args, parameters):
 def factory_lrscheduler(args, optimizer, training_batches_per_epoch):
     return torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        [LearningRateLambda(args.lr_burn_in_epochs * training_batches_per_epoch,
-                            [s * training_batches_per_epoch for s in args.lr_decay],
-                            gamma=args.lr_gamma,
-                            burn_in_factor=args.lr_burn_in_factor)],
+        [LearningRateLambda(args.lr_burn_in_epochs * training_batches_per_epoch,  # lr_burn_in_epochs: 2
+                            [s * training_batches_per_epoch for s in args.lr_decay],  # lr_decay:[120, 140]
+                            gamma=args.lr_gamma, # 0.1
+                            burn_in_factor=args.lr_burn_in_factor)],  # 0.001
     )

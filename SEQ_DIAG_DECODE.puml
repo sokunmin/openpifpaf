@@ -1,0 +1,184 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title PifPaf decode pipeline
+
+[-> Processor: run
+activate Processor
+
+activate PifPaf
+Processor -> PifPaf : <b>decode</b> .<font color=red>_call_(fields)</font>\n(pif, paf outpus)
+activate PifPaf
+
+
+' normalize PIF outputs
+group #faf6d7 Pif
+    PifPaf -> PifPaf : normalize_pif(fields)
+    activate PifPaf
+    PifPaf -> utils : index_field(feature_size)
+    activate utils
+    utils --> PifPaf : get indices of xy coords \nby feature size \n ← index_fields ((x,y), upH, upW)
+    deactivate utils
+    PifPaf -> PifPaf : \n* ((x,y), upH, upW) → (1, (x,y), upH, upW) \n* (1, (x,y), upH, upW) + (#kp, (x,y), upH, upW)\n* concat() → (#kp, (  <b>p_c, p_x, p_y, p_σ</b>   ), upH, upW)
+    note right : fields[pif_idx] -> \n<b>p_c</b> → (#kp, 1, upH, upW) \n<b>p_xy</b> → (#kp, (x,y)), upH, upW)\n<b>p_b</b> → unused\n<b>p_σ</b> → (#kp, 1, upH, upW)
+    PifPaf --> PifPaf : <b><font color=green>normalized_pifs</font></b>  : <font color=#ff1493>(#kp, (  <b>p_c, p_x, p_y, p_σ</b>   ), upH, upW)</font>
+    deactivate PifPaf
+end
+
+
+' normalize PAF outputs
+group #faf6d7 Pif
+    PifPaf -> PifPaf : normalize_paf(\fields)
+    activate PifPaf
+    PifPaf -> utils : index_field(feature_size)
+    activate utils
+    utils --> PifPaf : get indices of xy coords \nby feature size \n ← index_fields ((x,y), upH, upW)
+    deactivate utils
+    PifPaf -> PifPaf : \n* ((x,y), upH, upW) → (1, (x,y), upH, upW) \n* (1, (x,y), upH, upW) + (#edge, (a_x1, a_y1), upH, upW)\n* (1, (x,y), upH, upW) + (#edge, (a_x2, a_y2), upH, upW)\n* concat() → (#edge, (  <b>a_c, a_x1, a_y1, a_b1</b>    ), upH, upW)\n* concat() → (#edge, (  <b>a_c, a_x2, a_y2, a_b2</b>    ), upH, upW)\n* stack() → (#edge, 2, (  <b>a_c, a_x, a_y, a_b</b>    ), upH, upW)
+    note right : fields[paf_idx] -> \n<b>a_c</b> → (#edge, 1, upH, upW) \n<b>a_x1y1</b> → (#edge, (x,y)), upH, upW)\n<b>a_x2y2</b> → (#edge, (x,y)), upH, upW)\n<b>a_b1</b> → <font color=red>exp</font> (#edge, 1, upH, upW)\n<b>a_b2</b> → <font color=red>exp</font> (#edge, 1, upH, upW)
+    PifPaf --> PifPaf : <b><font color=blue>normalized_pafs</font></b>  : <font color=#ff1493>(#edge, 2, (  <b>a_c, a_x, a_y, a_b</b>    ), upH, upW)</font>
+    deactivate PifPaf
+end
+
+
+' PifHr
+group #f8d7fa PifHr
+    PifPaf --> PifHr : \n<<init>> (pif_nn:16) →   <b><font color=orangered>pifhr</font></b>
+    activate PifHr
+    PifPaf -> PifHr : <font color=orangered><b>pifhr</b></font> .fill_sequence(  <color:green>**normalized_pifs**</color>   , stride:8)\n→ <color:green>**normalized_pifs**</color>  : <color:#ff1493>(#kp, 4(  <b>p_c, p_x, p_y, p_σ</b>   ), upH, upW)</color>
+    PifHr -> PifHr : self.fill(pif, stride)
+    PifHr -> PifHr : self.fill_multiple([pif], stride)
+    note right : (#kp, 4, upH, upW) →  <color:orangered>fill_zeros()</color>\nedgeH: (upH - 1) * stride + 1\nedgeW: (upW - 1) * stride + 1)\n<color:blue>**target_accumulator**</color>  :(#kp, edgeH, edgeW)\n<color:blue>**scales**</color>  : (#kp, edgeH, edgeW)\n<color:blue>**scales_n**  </color>: (#kp, edgeH, edgeW)
+    loop //#kp// = zip(\n<color:blue>ta: target_accumulator</color>   (edgeH, edgeW),   \n<color:blue>p: pif </color>  ((p_c, p_x, p_y, p_σ), upH, upW), \n<color:blue>cuma / scale: scales</color>   (edgeH, edgeW), \n<color:blue>cumw / n: scales_n</color>   (edgeH, edgeW))
+        activate PifHr
+        PifHr -> PifHr : ‧ p = p_c > th:0.1 → (4, #pos) \n‧ p_x = p_x * stride\n‧ p_y = p_y * stride\n‧ p_σ = p_σ * stride
+        PifHr -> PifHr : \nscalar_square_add_gauss(\nta, p_x, p_y, p_σ, (p_c/pif_nn:16/#pifs))
+        note right : ‧ **min_x** :  p_x - 2 * p_σ^2\n‧ **min_y** :  p_y - 2 * p_σ^2\n‧ **max_x** :  p_x + 2 * p_σ^2\n‧ **max_y** :  p_y + 2 * p_σ^2
+        loop (min_xy ~ max_xy) → (xx, yy)
+            PifHr -> PifHr : ‧ Δ_x = (xx - p_x) ^ 2\n‧ Δ_y = (yy - p_y) ^ 2\n‧ <color:blue>ta[yy, xx]</color>  += p_c * exp(-1/2 * (Δ_x + Δ_y) / p_σ^2)\t
+        end
+        ' scale = cuma, n = cumw
+        PifHr -> PifHr : \ncumulative_average(\n<color:blue>cuma, cumw</color> , p_x, p_y, p_σ, p_σ, p_c)
+        note right : ‧ **min_x** :  p_x - p_σ\n‧ **min_y** :  p_y - p_σ\n‧ **max_x** :  p_x + p_σ\n‧ **max_y** :  p_y + p_σ
+        loop (min_xy ~ max_xy) → (xx, yy)
+            PifHr -> PifHr : ‧ <color:blue>cuma[yy, xx]</color>  = ((p_c * p_σ) +  <color:blue>cumw[yy, xx]</color>  * <color:blue>cuma[yy, xx]</color>  ) / (<color:blue>cumw[yy, xx]</color>   + p_c)\n‧ <color:blue>cumw[yy, xx]</color>  += p_c
+        end
+        deactivate PifHr
+    end
+    activate PifHr
+    deactivate PifHr
+    deactivate PifHr
+end
+
+
+' PifSeeds
+group #f8d7fa PifSeeds
+    PifPaf --> PifSeeds :\n <<init>> (  <font color=orangered><b>pifhr.target_accumulator</b></font>   , seed_th:0.2) →  <b><font color=orangered>seeds</font></b>
+    activate PifSeeds
+    PifPaf -> PifSeeds : <font color=orangered><b>seeds</b></font> .fill_sequence(  <b><font color=green>normalized_pifs</font></b>   , stride:8)
+    PifSeeds -> PifSeeds : self.fill(pif, stride)
+    loop //#kp// → [\n<color:blue>kp_id</color>, \n<color:blue>p: pif</color> ((p_c, p_x, p_y, p_σ), upH, upW)
+        activate PifSeeds
+        PifSeeds -> PifSeeds : ‧ p = p_c > th:0.1 → (4, #pos)
+        loop scalar_values()
+            PifSeeds -> PifSeeds : ‧ ta_p_c = np.fill((#pos,), -1)\n‧ ta_p_c = ta[p_y * stride, p_x * stride]\t
+        end
+        PifSeeds -> PifSeeds : ‧ m = ta_p_c > 0.2\n‧ p_x = p_x[m] * stride\n‧ p_y = p_y[m] * stride\n‧ ta_p_c = ta_p_c[m]\n‧ p_σ = p_σ[m] * stride
+        loop //#pos//→ zip(ta_cc:ta_p_c, p_xx:p_x, p_yy:p_y, p_σσ:p_σ)
+            PifSeeds -> PifSeeds : self.seed.append((ta_cc, kp_id, p_xx, p_yy, p_σσ))
+        end
+    end
+    deactivate PifSeeds
+end
+
+
+group #f8d7fa PafScored
+    PifPaf --> PafScored :\n ‧ <color:orangered>**pifhr.targets**</color>   =  <color:blue>**pifhr.target_accumulator** </color>   <= 1.0\n <<init>> (  <font color=orangered><b>pifhr.targets()</b></font>  , skeleton:edge_pairs, score_th:0.1) →    <b><font color=orangered>paf_scored</font></b>
+    activate PafScored
+    PifPaf -> PafScored : <font color=orangered><b>paf_scored</b></font>  .fill_sequence(  <b><font color=blue>normalized_pafs</font></b>   , stride:8)
+    PafScored -> PafScored : self.fill(paf, stride)
+    note right : ‧ **forward** : (#edge,)\n‧ **backward** : (#edge,)\n‧ **<color:blue>paf</color>** : (#edge, 2, 4, upH, upW)\n‧ **pif_floor**  : 0.1
+    loop //#edge// → [\n<color:blue>edge_id</color>, \n<color:blue>a: paf</color> (2, (a_c, a_x, a_y, a_b), upH, upW)\t
+        PafScored -> PafScored : ‧ ac_min = min(a_c, axis=0) → min(2, upH, upW) → (upH, upW) w/ min scores  \n‧ ac_min_mask = ac_min > score_th:0.1\n‧ ac_min = ac_min[ac_min_mask] →  (#pos,)\n‧ a = a[..., ac_min_mask].copy() → (2, 4, #pos)\n‧ a_x = a_x * stride → (2, #pos)\n‧ a_y = a_y * stride → (2, #pos)\n‧ a_b = a_b * stride → (2, #pos)
+        group #lightblue backward
+            PafScored -> PafScored : pair_j1i = skeleton[i][0] - 1
+            loop scalar_values()
+                PafScored -> PafScored : ‧ ta_p_c = np.fill((#pos,), -1)\n‧ ta_p_c = pifhr.ta[pair_j1i][a1_y, a1_x]\t
+            end
+            note right : ‧ pifhr.ta → (#kp, edgeH, edgeW)\n‧ pifhr.ta[pair_j1i] → (edgeH, edgeW)
+            PafScored -> PafScored : ‧ ta_bwd = ta_p_c\n‧ ac_bwd = ac_min * (pif_floor + (1.0 - pif_floor) * ta_bwd) → (#pos,)\n‧ mask_bwd = ac_bwd > score_th:0.1 → (#pos,)\n‧ d7_bwd = concat() → (\n        ac_bwd[mask_bwd], → (1, #pos)\n        a2(x2,y2,b2)[:, mask_bwd] → (3, #pos)\n        a1(x1,y1,b1)[:, mask_bwd] → (3, #pos)\n) → (7, #pos) = ((ac_bwd, a2(x2,y2,b2), a1(x1,y1,b1)), #pos)\n‧ backward[edge_id] = d7_bwd
+            alt backward[edge_id] is None
+                PafScored -> PafScored : backward[edge_id] = d7_bwd
+            else  existed
+                PafScored -> PafScored : concat() → (backward[edge_id], d7_bwd)\t
+            end
+        end
+        group #lightblue forward
+            PafScored -> PafScored : pair_j2i = skeleton[i][1] - 1
+            loop scalar_values()
+                PafScored -> PafScored : ‧ ta_p_c = np.fill((#pos,), -1)\n‧ ta_p_c = pifhr.ta[pair_j2i][a2_y, a2_x]\t
+            end
+            note right : ‧ pifhr.ta → (#kp, edgeH, edgeW)\n‧ pifhr.ta[pair_j2i] → (edgeH, edgeW)
+            PafScored -> PafScored : ‧ ta_fwd = ta_p_c\n‧ ac_fwd = ac_min * (pif_floor + (1.0 - pif_floor) * ta_fwd) → (#pos,)\n‧ mask_fwd = ac_fwd > score_th:0.1 → (#pos,)\n‧ d7_fwd = concat() → (\n        ac_fwd[mask_fwd], → (1, #pos)\n        a2(x2,y2,b2)[:, mask_fwd] → (3, #pos)\n        a1(x1,y1,b1)[:, mask_fwd] → (3, #pos)\n) → (7, #pos) = ((ac_fwd, a2(x2,y2,b2), a1(x1,y1,b1)), #pos)
+            alt forward[edge_id] is None
+                PafScored -> PafScored : forward[edge_id] = d7_fwd
+            else existed
+                PafScored -> PafScored : concat() → (forward[edge_id], d7_fwd)\t
+            end
+        end
+    end
+    deactivate PafScored
+end
+
+
+group #f8d7fa Greedy
+    PifPaf --> Greedy :\n <<init>> (  <font color=orangered><b>pifhr, paf_scored, seed</b></font>    ) → <b><font color=orangered>gen</font></b>
+    activate Greedy
+    note right : * **seed_th**  : 0.2\n* **connect_method**  : blend\n* **paf_nn**  : 35\n* **paf_th**  : 0.1\n* **keypoints**  : names\n* **skeleton**  : pairs
+    PifPaf -> Greedy :  <font color=orangered><b>gen</b></font> .annotations()
+    note right : ‧ **occupied**   : np.zeros((#kp, edgeH, edgeW))\n‧ **seed**  : (#pos, (ta_cc, kp_id, p_xx, p_yy, p_σσ))\n‧ **keypoints**  : names\n‧ **skeleton**  : pairs\n‧ **data**  : (#kp, (p_xx,p_yy,ta_cc))
+    Greedy -> PifSeeds : seed.get() → sorted(seeds, reverse=True)
+    PifSeeds --> Greedy : seeds
+    Greedy -> Greedy : annotations = []
+    loop //#pos// → [ta_cc, kp_id, p_xx, p_yy, p_σσ]
+        activate Greedy
+        Greedy --> Annotation : <<init>>(keypoints, skeleton)
+        activate Annotation
+        Annotation --> Greedy : **ann**
+        Greedy -> Annotation : **ann** .add(kp_id, (p_xx, p_yy, ta_cc))
+        Annotation -> Annotation : data[kp_id] = (p_xx, p_yy, ta_cc)
+        Greedy --> Greedy : _grow(  **ann**  , paf_th)
+        Greedy -> Annotation : ‧ fwd = data[pair_j1i, ta_cc] > 0 && \n             data[pair_j2i, ta_cc] == 0\n‧ fwd = (data[pair_j1i, ta_cc], pair_id, True, pair_j1i, pair_j2i)\n‧ bwd = data[pair_j2i, ta_cc] > 0 && \n             data[pair_j1i, ta_cc] == 0\n‧ bwd = (data[pair_j2i, ta_cc], pair_id, False, pair_j1i, pair_j2i)\n‧ sorted((fwd, bwd), reverse=True)
+        loop
+        end
+        Greedy -> Annotation : fill_joint_scales()
+        Greedy -> Greedy : annotations.append(  **ann**  )
+        Greedy -> Greedy : mark_occupied(  **ann** )
+        deactivate Annotation
+        deactivate Greedy
+    end
+    Greedy --> PifPaf :  <font color=purple><b>annotations</b></font>
+end
+
+
+
+group #afeeee Force complete
+    PifPaf --> PafScored :\n <<init>> (  <font color=orangered><b>pifhr.targets</b></font>  , skeleton:edge_pairs, score_th:0.0001) →    <b><font color=orangered>paf_scored</font></b>
+    activate PafScored
+    PafScored --> PifPaf : <font color=orangered><b>gen.paf_scored</b></font>   = <font color=orangered><b>paf_scored</b></font>
+    PifPaf -> PafScored : <font color=orangered><b>gen.paf_scored</b></font>  .fill_sequence(  <b><font color=blue>normalized_pafs</font></b>   , stride:8)
+    PifPaf -> Greedy : <font color=orangered><b>gen</b></font> .complete_annotations(   <font color=purple><b>annotations</b></font>  )
+    Greedy --> PifPaf : <font color=purple><b>annotations</b></font>
+    deactivate Greedy
+    deactivate PafScored
+end
+
+PifPaf --> Processor : <font color=purple><b>annotations</b></font>
+
+deactivate PifPaf
+deactivate PifPaf
+deactivate Processor
+
+
+@enduml

@@ -1,0 +1,46 @@
+@startuml
+header Page Header
+footer Page %page% of %lastpage%
+
+title Training pipeline
+
+[-> train : run
+activate train
+train -> train : parse args
+
+== init model ==
+
+train -> nets : nets.factory_from_args(args)
+activate nets
+nets -> nets : del maxpool in stem
+create "basenet:BaseNetwork"
+nets --> "basenet:BaseNetwork" : <<init>>
+activate "basenet:BaseNetwork"
+nets -> heads : heads.factory(#heads)
+activate heads
+create "headnets:CompositeField"
+heads --> "headnets:CompositeField" : <<init>>
+activate "headnets:CompositeField"
+"headnets:CompositeField" -> "headnets:CompositeField" : determine n_fields, \nn_vectors, n_scales
+"headnets:CompositeField" --> nets : headnets
+deactivate heads
+create "net:Shell"
+nets --> "net:Shell" : <<init>>(basenet, headnets)
+activate "net:Shell"
+nets --> train : net, start_epoch
+deactivate nets
+
+box "Model"
+    participant nets
+    participant heads
+    participant "basenet:BaseNetwork"
+    participant "headnets:CompositeField"
+    participant "net:Shell"
+end box
+
+deactivate train
+deactivate "basenet:BaseNetwork"
+deactivate "headnets:CompositeField"
+deactivate "net:Shell"
+[<- train : done
+@enduml

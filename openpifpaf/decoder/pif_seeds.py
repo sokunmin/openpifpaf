@@ -18,15 +18,15 @@ class PifSeeds(object):
 
     def fill(self, pif, stride, min_scale=0.0):
         start = time.perf_counter()
-
-        for field_i, p in enumerate(pif):
-            p = p[:, p[0] > self.seed_threshold / 2.0]
+        # TOCHECK: What does `pifhr` exactly do with `reg_xy`?
+        for field_i, p in enumerate(pif):  # > #kp
+            p = p[:, p[0] > self.seed_threshold / 2.0]  # (4, (cls > 0.2 / 2.0)) -> (4, #pos)
             if min_scale:
                 p = p[:, p[3] > min_scale / stride]
-            _, x, y, s = p
-            v = scalar_values(self.pifhr[field_i], x * stride, y * stride)
-            m = v > self.seed_threshold
-            x, y, v, s = x[m] * stride, y[m] * stride, v[m], s[m] * stride
+            _, x, y, s = p  # reg coords after `equation (3)`
+            v = scalar_values(self.pifhr[field_i], x * stride, y * stride) # `pifhr`: (#kp, edgeH, edgeW) -> (edgeH, edgeW)
+            m = v > self.seed_threshold  # v > 0.2
+            x, y, v, s = x[m] * stride, y[m] * stride, v[m], s[m] * stride  # TOCHECK: why multiple again?
 
             for vv, xx, yy, ss in zip(v, x, y, s):
                 self.seeds.append((vv, field_i, xx, yy, ss))

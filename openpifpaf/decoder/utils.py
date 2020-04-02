@@ -6,11 +6,11 @@ import numpy as np
 
 @functools.lru_cache(maxsize=16)
 def index_field(shape):
-    yx = np.indices(shape, dtype=np.float32)
+    yx = np.indices(shape, dtype=np.float32)  # > ((y,x), upH, upW)
     xy = np.flip(yx, axis=0)
     return xy
 
-
+# TOCHECK: weiszfeld step?
 def weiszfeld_nd(x, init_y, weights=None, epsilon=1e-8, max_steps=20):
     """Weighted Weiszfeld step."""
     if weights is None:
@@ -41,7 +41,7 @@ def sparse_bilinear_kernel(coord, value):
     v = [np.prod(1.0 - np.abs(coord-corner)) * value for corner in g]
     return g, v
 
-
+# TOCHECK: sparse gaussian field?
 class Sparse2DGaussianField(object):
     def __init__(self, data=None, nearest_neighbors=25):
         if data is None:
@@ -82,17 +82,20 @@ class Sparse2DGaussianField(object):
 
 def normalize_paf(intensity_fields, j1_fields, j2_fields, j1_fields_logb, j2_fields_logb, *,
                   fixed_b=None):
-    intensity_fields = np.expand_dims(intensity_fields, 1)
-    j1_fields_b = np.expand_dims(np.exp(j1_fields_logb), 1)
-    j2_fields_b = np.expand_dims(np.exp(j2_fields_logb), 1)
+    intensity_fields = np.expand_dims(intensity_fields, 1)  # >(#edge, upH, upW) -> (#edge, 1, upH, upW)
+    j1_fields_b = np.expand_dims(np.exp(j1_fields_logb), 1)  # TOCHECK: exp(#edge, upH, upW) -> (#edge, 1, upH, upW)
+    j2_fields_b = np.expand_dims(np.exp(j2_fields_logb), 1)  # TOCHECK: exp(#edge, upH, upW) -> (#edge, 1, upH, upW)
     if fixed_b:
         j1_fields_b = np.full_like(j1_fields_b, fixed_b)
         j2_fields_b = np.full_like(j2_fields_b, fixed_b)
-
-    index_fields = index_field(j1_fields[0, 0].shape)
-    index_fields = np.expand_dims(index_fields, 0)
+    # j1_fields[0, 0].shape = (upH, upW)
+    index_fields = index_field(j1_fields[0, 0].shape)  # > ((x,y), upH, upW)
+    index_fields = np.expand_dims(index_fields, 0)  # > (1, (x,y)), upH, upW)
+    # > (#edge, (cls, reg1_x, reg1_y, spread1_exp), upH, upW)
     j1_fields3 = np.concatenate((intensity_fields, index_fields + j1_fields, j1_fields_b), axis=1)
+    # > (#edge, (cls, reg2_x, reg2_y, spread2_exp), upH, upW)
     j2_fields3 = np.concatenate((intensity_fields, index_fields + j2_fields, j2_fields_b), axis=1)
+    # > (#edge, 2, (cls, reg_x, reg_y, spread), upH, upW)
     paf = np.stack((j1_fields3, j2_fields3), axis=1)
 
     return paf
@@ -100,19 +103,19 @@ def normalize_paf(intensity_fields, j1_fields, j2_fields, j1_fields_logb, j2_fie
 
 def normalize_pif(joint_intensity_fields, joint_fields, _, scale_fields, *,
                   fixed_scale=None):
-    joint_intensity_fields = np.expand_dims(joint_intensity_fields.copy(), 1)
-    scale_fields = np.expand_dims(scale_fields, 1)
+    joint_intensity_fields = np.expand_dims(joint_intensity_fields.copy(), 1)  # > (#kp, upH, upW) -> (#kp, 1, upH, upW)
+    scale_fields = np.expand_dims(scale_fields, 1)  # > (#kp, upH, upW) -> (#kp, 1, upH, upW)
     if fixed_scale is not None:
         scale_fields[:] = fixed_scale
-
-    index_fields = index_field(joint_fields.shape[-2:])
-    index_fields = np.expand_dims(index_fields, 0)
-    joint_fields = index_fields + joint_fields
-
+    # `joint_fields.shape` = (#kp, 2, upH, upW) -> (upH, upW)
+    index_fields = index_field(joint_fields.shape[-2:])  # > ((x,y), upH, upW)
+    index_fields = np.expand_dims(index_fields, 0)  # > (1, (x,y), upH, upW)
+    joint_fields = index_fields + joint_fields  # > (1, (x,y), upH, upW) + (#kp, (x,y), upH, upW)
+    # TOCHECK: [#3 args] `reg_spread` is used only in backprop?
     return np.concatenate(
         (joint_intensity_fields, joint_fields, scale_fields),
         axis=1,
-    )
+    )  # > (#kp, (cls, reg_x, reg_y, scale), upH, upW)
 
 
 def normalize_pifs(joint_intensity_fields, joint_fields, scale_fields, *,
@@ -135,6 +138,6 @@ def normalize_pifs(joint_intensity_fields, joint_fields, scale_fields, *,
 def scalar_square_add_single(field, x, y, width, value):
     minx = max(0, int(x - width))
     miny = max(0, int(y - width))
-    maxx = max(minx + 1, min(field.shape[1], int(x + width) + 1))
-    maxy = max(miny + 1, min(field.shape[0], int(y + width) + 1))
+    maxx = max(minx + 1, min(field.shape[1], int(x + width) + 1))  # W
+    maxy = max(miny + 1, min(field.shape[0], int(y + width) + 1))  # H
     field[miny:maxy, minx:maxx] += value

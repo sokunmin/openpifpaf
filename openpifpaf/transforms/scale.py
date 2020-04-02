@@ -17,7 +17,7 @@ def _scale(image, anns, meta, target_w, target_h, resample):
 
     # scale image
     w, h = image.size
-    image = image.resize((target_w, target_h), resample)
+    image = image.resize((target_w, target_h), resample)  # > resample: BICUBIC
     LOG.debug('before resize = (%f, %f), after = %s', w, h, image.size)
 
     # rescale keypoints
@@ -34,10 +34,10 @@ def _scale(image, anns, meta, target_w, target_h, resample):
     # adjust meta
     scale_factors = np.array((x_scale, y_scale))
     LOG.debug('meta before: %s', meta)
-    meta['offset'] *= scale_factors
-    meta['scale'] *= scale_factors
-    meta['valid_area'][:2] *= scale_factors
-    meta['valid_area'][2:] *= scale_factors
+    meta['offset'] *= scale_factors # > [0,0] * scale_factors
+    meta['scale'] *= scale_factors  # > [1,1] * scale_factors
+    meta['valid_area'][:2] *= scale_factors  # [0,0,ori_w,ori_h][:2] * scale_factors
+    meta['valid_area'][2:] *= scale_factors  # [0,0,ori_w,ori_h][2:] * scale_factors
     LOG.debug('meta after: %s', meta)
 
     for ann in anns:
@@ -50,22 +50,22 @@ class RescaleRelative(Preprocess):
     def __init__(self, scale_range=(0.5, 1.0), *,
                  resample=PIL.Image.BICUBIC,
                  power_law=False):
-        self.scale_range = scale_range
-        self.resample = resample
-        self.power_law = power_law
+        self.scale_range = scale_range  # (0.4, 2.0)
+        self.resample = resample  # 3
+        self.power_law = power_law  # true
 
     def __call__(self, image, anns, meta):
-        if isinstance(self.scale_range, tuple):
-            if self.power_law:
-                rnd_range = np.log2(self.scale_range[0]), np.log2(self.scale_range[1])
+        if isinstance(self.scale_range, tuple):  # > (0.4, 2.0)
+            if self.power_law:  # <-
+                rnd_range = np.log2(self.scale_range[0]), np.log2(self.scale_range[1])  # > TOCHECK: (-1.32..., 1.0)
                 log2_scale_factor = (
                     rnd_range[0] +
-                    torch.rand(1).item() * (rnd_range[1] - rnd_range[0])
+                    torch.rand(1).item() * (rnd_range[1] - rnd_range[0])  # `rand=[0,1)` * 2.32... = [-1.32..., 2.64...)
                 )
                 # mean = 0.5 * (rnd_range[0] + rnd_range[1])
                 # sigma = 0.5 * (rnd_range[1] - rnd_range[0])
                 # log2_scale_factor = mean + sigma * torch.randn(1).item()
-
+                # > TOCHECK: scale_factor = [0.4, 0.16) = 2 ^(log2(0.4) + rand([0,1)) * (log2(0.4)-log2(1)))
                 scale_factor = 2 ** log2_scale_factor
                 # LOG.debug('mean = %f, sigma = %f, log2r = %f, scale = %f',
                 #           mean, sigma, log2_scale_factor, scale_factor)
@@ -95,7 +95,7 @@ class RescaleAbsolute(Preprocess):
         this_long_edge = self.long_edge
         if isinstance(this_long_edge, (tuple, list)):
             this_long_edge = int(torch.randint(this_long_edge[0], this_long_edge[1], (1,)).item())
-
+        # > max edge = this_long_edge
         s = this_long_edge / max(h, w)
         if h > w:
             target_w, target_h = int(w * s), this_long_edge
