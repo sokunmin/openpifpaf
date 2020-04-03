@@ -69,7 +69,7 @@ class Greedy(object):
             annotations.append(ann)
             mark_occupied(ann)
         # `seed`: sorted reg coords after `equation (3)`
-        for v, f, x, y, _ in self.seeds.get():
+        for v, f, x, y, _ in self.seeds.get():  # > #seeds of all kinds
             if scalar_nonzero(occupied[f], x, y):
                 continue
 
@@ -89,17 +89,17 @@ class Greedy(object):
     def _grow_connection(self, xy, xy_scale, paf_field):
         assert len(xy) == 2
         assert paf_field.shape[0] == 7  #(c, x,y,b, x,y,b)
-
+        # `seed` as center
         # source value: eliminate coords beyond the disks(sigma)
         paf_field = paf_center(paf_field, xy[0], xy[1], sigma=5.0 * xy_scale)  # (7, #pos)
         if paf_field.shape[1] == 0:
             return 0, 0, 0
 
-        # source distance: `seed` as μ <--> `target1`
+        # source distance: `seed` as μ <--> `a1`
         d = np.linalg.norm(((xy[0],), (xy[1],)) - paf_field[1:3], axis=0)  # (#pos,)
 
         # combined value and source distance
-        v = paf_field[0]  # `f2(ax2, ay2)`
+        v = paf_field[0]  # `ac`: (#pos,)
         scores = np.exp(-1.0 * d / xy_scale) * v  # two-tailed cumulative Laplace -> (#pos,)
         # `target2`
         if self.connection_method == 'median':
@@ -107,7 +107,7 @@ class Greedy(object):
         if self.connection_method == 'max':
             return self._target_with_maxscore(paf_field[4:6], scores)
         if self.connection_method == 'blend':
-            return self._target_with_blend(paf_field[4:6], scores)
+            return self._target_with_blend(paf_field[4:6], scores)  # > (`a2`, `ac`)
         raise Exception('connection method not known')
 
     def _target_with_median(self, target_coordinates, scores, sigma, max_steps=20):
@@ -142,14 +142,14 @@ class Greedy(object):
     @staticmethod
     def _target_with_blend(target_coordinates, scores):
         """Blending the top two candidates with a weighted average.
-
+        target_coordinates: ((x2,y2), #pos)
         Similar to the post processing step in
         "BlazeFace: Sub-millisecond Neural Face Detection on Mobile GPUs".
         """
         assert target_coordinates.shape[1] == len(scores)
         if len(scores) == 1:
             return target_coordinates[0, 0], target_coordinates[1, 0], scores[0]
-
+        # > `argsort`: min -> max, pick top2 scores
         sorted_i = np.argsort(scores)  # (#pos,)
         max_entry_1 = target_coordinates[:, sorted_i[-1]]  # ((x,y), #pos) -> (x,y) w/ 1st-high score
         max_entry_2 = target_coordinates[:, sorted_i[-2]]  # ((x,y), #pos) -> (x,y) w/ 2nd-high score
@@ -159,8 +159,10 @@ class Greedy(object):
         if score_2 < 0.01 or score_2 < 0.5 * score_1:  # score is low
             return max_entry_1[0], max_entry_1[1], score_1
         # > ((1st score * 1st-high score) + (2nd score * 2nd-high score)) / (1st score + 2nd score) -> (x,y,v)
-        return (
+        return (# > take scores as value `1`, e.g., get the average coords cuz it's greedy algo.
+            # > ((top1_score * top1_x) + (top2_score * top2_x)) / (top1_score + top2_score)
             (score_1 * max_entry_1[0] + score_2 * max_entry_2[0]) / (score_1 + score_2),  # x
+            # > ((top1_score * top1_y) + (top2_score * top2_y)) / (top1_score + top2_score)
             (score_1 * max_entry_1[1] + score_2 * max_entry_2[1]) / (score_1 + score_2),  # y
             0.5 * (score_1 + score_2),  # v
         )
@@ -176,18 +178,18 @@ class Greedy(object):
                 jsi, jti = j2i, j1i
                 directed_paf_field = self.paf_scored.backward[i]  # (#edge, 7, #pos) -> (7, #pos)
                 directed_paf_field_reverse = self.paf_scored.forward[i]  # (#edge, 7, #pos) -> (7, #pos)
-            # > `[1]`
+            # > `[1]` get `scales(cuma)` at location of `pifhr[jsi, p_xx, p_yy]`
             xyv = ann.data[jsi]  # seed_xy
             xy_scale_s = max(
                 8.0,
                 scalar_value(self.pifhr.scales[jsi], xyv[0], xyv[1])  # (#kp, edgeH, edgeW) -> xy coord value
             )
             # > `[2]` (`seed_xy`, `seed_scale`, (score, x,y,b, x,y,b, #pos) -> weighted/calibrated (x,y,v)
-            new_xyv = self._grow_connection(xyv[:2], xy_scale_s, directed_paf_field)
-            if new_xyv[2] < th:
+            new_xyv = self._grow_connection(xyv[:2], xy_scale_s, directed_paf_field) # > (x,y,v)
+            if new_xyv[2] < th: # new_a_c < 0.1
                 continue
             xy_scale_t = max(
-                8.0,
+                8.0,  # TOCHECK: why use new_xy to get scale from target
                 scalar_value(self.pifhr.scales[jti], new_xyv[0], new_xyv[1])  # (#kp, edgeH, edgeW) -> xy coord value
             )
 
@@ -195,8 +197,9 @@ class Greedy(object):
             if reverse_match:  # <-
                 # > `[3]` (`calib_xy`, `calib_scale`, (score, x,y,b, x,y,b, #pos) -> (x,y,v)
                 reverse_xyv = self._grow_connection(new_xyv[:2], xy_scale_t, directed_paf_field_reverse)
-                if reverse_xyv[2] < th:  # v < `th`(0.1)
+                if reverse_xyv[2] < th:  # v < `th`: 0.1
                     continue
+                # abs(seed_x - reverse_x) + abs(seed_y - reverse_y) > xy_scale_s(scale for reversing xy)
                 if abs(xyv[0] - reverse_xyv[0]) + abs(xyv[1] - reverse_xyv[1]) > xy_scale_s:
                     continue
 

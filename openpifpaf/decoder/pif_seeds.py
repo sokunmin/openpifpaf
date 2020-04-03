@@ -26,9 +26,10 @@ class PifSeeds(object):
             _, x, y, s = p  # reg coords after `equation (3)`
             v = scalar_values(self.pifhr[field_i], x * stride, y * stride) # `pifhr`: (#kp, edgeH, edgeW) -> (edgeH, edgeW)
             m = v > self.seed_threshold  # v > 0.2
-            x, y, v, s = x[m] * stride, y[m] * stride, v[m], s[m] * stride  # TOCHECK: why multiple again?
+            x, y, v, s = x[m] * stride, y[m] * stride, v[m], s[m] * stride
 
             for vv, xx, yy, ss in zip(v, x, y, s):
+                # > `field_i`: starting joint
                 self.seeds.append((vv, field_i, xx, yy, ss))
 
         LOG.debug('seeds %d, %.3fs', len(self.seeds), time.perf_counter() - start)
@@ -37,7 +38,7 @@ class PifSeeds(object):
     def get(self):
         if self.debug_visualizer:
             self.debug_visualizer.seeds(self.seeds)
-
+        # sort all types of seeds and pick one w/ highest value of confidence map
         return sorted(self.seeds, reverse=True)
 
     def fill_sequence(self, pifs, strides, min_scales):

@@ -49,7 +49,7 @@ group #f8d7fa PifHr
     PifPaf -> PifHr : <font color=orangered><b>pifhr</b></font> .fill_sequence(  <color:green>**normalized_pifs**</color>   , stride:8)\n→ <color:green>**normalized_pifs**</color>  : <color:#ff1493>(#kp, 4(  <b>p_c, p_x, p_y, p_σ</b>   ), upH, upW)</color>
     PifHr -> PifHr : self.fill(pif, stride)
     PifHr -> PifHr : self.fill_multiple([pif], stride)
-    note right : (#kp, 4, upH, upW) →  <color:orangered>fill_zeros()</color>\nedgeH: (upH - 1) * stride + 1\nedgeW: (upW - 1) * stride + 1)\n<color:blue>**target_accumulator**</color>  :(#kp, edgeH, edgeW)\n<color:blue>**scales**</color>  : (#kp, edgeH, edgeW)\n<color:blue>**scales_n**  </color>: (#kp, edgeH, edgeW)
+    note right : (#kp, 4, upH, upW) →  <color:orangered>fill_zeros()</color>\nedgeH: (upH - 1) * stride + 1\nedgeW: (upW - 1) * stride + 1)\n<color:blue>**target_accumulator**</color>  :(#kp, edgeH, edgeW)\n<color:blue>**cuma/scales**</color>  : (#kp, edgeH, edgeW)\n<color:blue>**cumw/scales_n**  </color>: (#kp, edgeH, edgeW)
     loop //#kp// = zip(\n<color:blue>ta: target_accumulator</color>   (edgeH, edgeW),   \n<color:blue>p: pif </color>  ((p_c, p_x, p_y, p_σ), upH, upW), \n<color:blue>cuma / scale: scales</color>   (edgeH, edgeW), \n<color:blue>cumw / n: scales_n</color>   (edgeH, edgeW))
         activate PifHr
         PifHr -> PifHr : ‧ p = p_c > th:0.1 → (4, #pos) \n‧ p_x = p_x * stride\n‧ p_y = p_y * stride\n‧ p_σ = p_σ * stride
@@ -137,11 +137,11 @@ group #f8d7fa Greedy
     activate Greedy
     note right : * **seed_th**  : 0.2\n* **connect_method**  : blend\n* **paf_nn**  : 35\n* **paf_th**  : 0.1\n* **keypoints**  : names\n* **skeleton**  : pairs
     PifPaf -> Greedy :  <font color=orangered><b>gen</b></font> .annotations()
-    note right : ‧ **occupied**   : np.zeros((#kp, edgeH, edgeW))\n‧ **seed**  : (#pos, (ta_cc, kp_id, p_xx, p_yy, p_σσ))\n‧ **keypoints**  : names\n‧ **skeleton**  : pairs\n‧ **data**  : (#kp, (p_xx,p_yy,ta_cc))
+    note right : ‧ **occupied**   : np.zeros((#kp, edgeH, edgeW))\n‧ **seed**  : (#pos, (ta_cc, kp_id, p_xx, p_yy, p_σσ))\n‧ **keypoints**  : names\n‧ **skeleton**  : pairs\n‧ **data(seed)**  : (#kp, (p_xx,p_yy,ta_cc))
     Greedy -> PifSeeds : seed.get() → sorted(seeds, reverse=True)
-    PifSeeds --> Greedy : seeds
+    PifSeeds --> Greedy : seeds(#pos, (ta_cc, kp_id, p_xx, p_yy, p_σσ))
     Greedy -> Greedy : annotations = []
-    loop //#pos// → [ta_cc, kp_id, p_xx, p_yy, p_σσ]
+    loop //#pos// → seed.get() → [ta_cc, kp_id, p_xx, p_yy, p_σσ]
         activate Greedy
         Greedy --> Annotation : <<init>>(keypoints, skeleton)
         activate Annotation
@@ -149,8 +149,37 @@ group #f8d7fa Greedy
         Greedy -> Annotation : **ann** .add(kp_id, (p_xx, p_yy, ta_cc))
         Annotation -> Annotation : data[kp_id] = (p_xx, p_yy, ta_cc)
         Greedy --> Greedy : _grow(  **ann**  , paf_th)
-        Greedy -> Annotation : ‧ fwd = data[pair_j1i, ta_cc] > 0 && \n             data[pair_j2i, ta_cc] == 0\n‧ fwd = (data[pair_j1i, ta_cc], pair_id, True, pair_j1i, pair_j2i)\n‧ bwd = data[pair_j2i, ta_cc] > 0 && \n             data[pair_j1i, ta_cc] == 0\n‧ bwd = (data[pair_j2i, ta_cc], pair_id, False, pair_j1i, pair_j2i)\n‧ sorted((fwd, bwd), reverse=True)
-        loop
+        group _grow() → frontier_iter()
+            group frontier
+                Greedy -> Annotation : ‧ fwd = ta_cc(data[pair_j1i]) > 0 && \n             ta_cc(data[pair_j2i]) == 0\n‧ fwd = (ta_cc(data[pair_j1i]), pair_id, True, pair_j1i, pair_j2i)\n‧ bwd = ta_cc(data[pair_j2i]) > 0 && \n             ta_cc(data[pair_j1i]) == 0\n‧ bwd = (ta_cc(data[pair_j2i]), pair_id, False, pair_j1i, pair_j2i)\n‧ sorted((fwd, bwd), reverse=True)\n‧ get adjacent edges
+                Annotation --> Annotation : <b>frontier()</b>
+            end
+            loop while loop over adjacent edges
+                Annotation -> Annotation : pop(0) from frontier()
+                Annotation --> Greedy : yield **next_item** \n(ta_cc, conn_idx, forward?, joint_idx1, joint_idx2)
+                group popped edge
+                    alt forward
+                        Greedy -> Greedy : ‧ ji_s = j1i\n‧ ji_t = j2i\n‧ paf_field = paf_scored.forward[conn_idx] → (7, #pos)\n‧ paf_field_reverse = paf_scored.backward[conn_idx] → (7, #pos)
+                    else backward
+                        Greedy -> Greedy : ‧ ji_s = j2i\n‧ ji_t = j1i\n‧ paf_field = paf_scored.backward[conn_idx] → (7, #pos)\n‧ paf_field_reverse = paf_scored.forward[conn_idx] → (7, #pos)
+                    end
+                    group seed
+                        Annotation --> Greedy: p_xx, p_yy, ta_cc = ann.data[ji_s]
+                        Greedy -> Greedy : ‧ p_xx, p_yy, ta_cc = ann.data[ji_s] → (p_xx, p_yy, ta_cc)\n‧ pifhr.scales(cuma) → (#kp, edgeH, edgeW)\n‧ pifhr.scales[ji_s] → (edgeH, edgeW)\n‧ xy_scale_s(cuma) = max(8, pifhr.scales[ji_s][p_yy, p_xx])
+                        Greedy -> Greedy : new_pxx, new_pyy, new_ta_cc = _grow_connection(p_xx, p_yy, xy_scale_s, paf_field)\n
+                    end
+                    group reverse match
+                        Annotation --> Greedy: p_xx, p_yy, ta_cc = ann.data[ji_s]
+                        Greedy -> Greedy : ‧ p_xx, p_yy, ta_cc = ann.data[ji_t] → (p_xx, p_yy, ta_cc)\n‧ pifhr.scales(cuma) → (#kp, edgeH, edgeW)\n‧ pifhr.scales[ji_t] → (edgeH, edgeW)\n‧ xy_scale_s(cuma) = max(8, pifhr.scales[ji_t][p_yy, p_xx])
+                        Greedy -> Greedy : new_a_xyv = _grow_connection(p_xx, p_yy, xy_scale_s, paf_field)\npaf_field → (7, #pos)
+                    end
+                    note right : _grow_connection(p_xx, p_yy, xy_scale_s, paf_field)\n‧ paf_center(paf_field, p_xx, p_yy, sigma=(xy_scale_s * 5))\n‧ eliminate a_x1y1 & a_x2y2 beyond sigma around p_xx & p_yy\n‧ compute source distance between seed(p_xx, p_yy) and a1(a_x1,ay1)\n‧ compute Laplace distribution as scores\n‧ new_a_xyv = target_with_blend(a2, scores)
+                end
+                Annotation -> Annotation : update frontier / traverse new frontier
+                break frontier == empty
+                    Annotation -> Greedy : no more frontier
+                end
+            end
         end
         Greedy -> Annotation : fill_joint_scales()
         Greedy -> Greedy : annotations.append(  **ann**  )

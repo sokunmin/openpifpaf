@@ -51,7 +51,7 @@ class PafScored(object):
             fourds[:, 1] *= stride  # reg_x * stride -> (2, #pos)
             fourds[:, 2] *= stride  # reg_y * stride -> (2, #pos)
             fourds[:, 3] *= stride  # scale * stride -> (2, #pos)
-            # paf_i = edge_i
+            # > `forward` -> assign to `backward`
             j1i = self.skeleton[paf_i][0] - 1
             if self.pif_floor < 1.0:  # 0.1
                 # `pifhr[j1i]`: (edgeH, edgeW), `ax1`: (#pos,), `ay1`: (#pos,)
@@ -71,8 +71,8 @@ class PafScored(object):
                 self.backward[paf_i] = d7_b
             else:
                 self.backward[paf_i] = np.concatenate((self.backward[paf_i], d7_b), axis=1)
-            # > associated/paired keypoint
-            j2i = self.skeleton[paf_i][1] - 1
+            # > `backward` -> assign to `forward`
+            j2i = self.skeleton[paf_i][1] - 1  # e.g.(5,12)
             if self.pif_floor < 1.0:  # 0.1
                 # `pifhr[j2i]`: (edgeH, edgeW), `ax2`: (#pos,), `ay2`: (#pos,)
                 pifhr_f = scalar_values(

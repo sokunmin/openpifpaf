@@ -24,8 +24,8 @@ def laplace_loss(x1, x2, logb, t1, t2, weight=None):
     # left derivative of sqrt at zero is not defined, so prefer torch.norm():
     # https://github.com/pytorch/pytorch/issues/2421
     # norm = torch.sqrt((x1 - t1)**2 + (x2 - t2)**2)
-    norm = (torch.stack((x1, x2)) - torch.stack((t1, t2))).norm(dim=0) # (#pos,)
-    # TOCHECK: (1) why set 0.694? (2) +log, not *log?
+    norm = (torch.stack((x1, x2)) - torch.stack((t1, t2))).norm(dim=0)  # > |x-μ| → (#pos,)
+    # > TOCHECK: log2 = 0.694   0.694 + logb == log2b
     losses = 0.694 + logb + norm * torch.exp(-logb)  # > torch.exp(-logb) == 1 / b
     if weight is not None:
         losses = losses * weight
@@ -201,7 +201,7 @@ class CompositeLoss(torch.nn.Module):
         x_spreads = x[1 + self.n_vectors:1 + 2 * self.n_vectors]  # >[2] spread: (#obj, 17, up_H, up_W)
         x_scales = []
         if self.n_scales:  # <- pif
-            x_scales = x[1 + 2 * self.n_vectors:1 + 2 * self.n_vectors + self.n_scales] # >[3] scales: (#obj, 17, up_H, up_W)
+            x_scales = x[1 + 2 * self.n_vectors:1 + 2 * self.n_vectors + self.n_scales]  # >[3] scales: (#obj, 17, up_H, up_W)
 
         assert len(t) == 1 + self.n_vectors + 1
         target_intensity = t[0]  # >(#obj, 18/20, up_H, up_W)
@@ -256,13 +256,15 @@ class CompositeLoss(torch.nn.Module):
                     )
                 # > `laplace loss` is used here.
                 reg_losses.append(self.regression_loss(  # `reg_masks`: (#obj, 17/19, up_H, up_W)
+                    # > pred offset xy
                     torch.masked_select(x_reg[:, :, 0], reg_masks),  # `x_reg[...,0]`: (#obj, 17/19, up_H, up_W)
                     torch.masked_select(x_reg[:, :, 1], reg_masks),  # `x_reg[...,1]`: (#obj, 17/19, up_H, up_W)
-                    torch.masked_select(x_spread, reg_masks),  # `x_spread`: (#obj, 17/19, up_H, up_W)
+                    torch.masked_select(x_spread, reg_masks),  # `logb/x_spread`: (#obj, 17/19, up_H, up_W)
+                    # > target offset x y
                     torch.masked_select(target_reg[:, :, 0], reg_masks),  # `target_reg[...,0]`: (#obj, 17/19, up_H, up_W)
                     torch.masked_select(target_reg[:, :, 1], reg_masks),  # `target_reg[...,1]`: (#obj, 17/19, up_H, up_W)
                     weight=weight,
-                ) / 1000.0 / batch_size)
+                ) / 1000.0 / batch_size) # u是target offset
 
         scale_losses = []
         if x_scales:

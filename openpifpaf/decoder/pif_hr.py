@@ -4,11 +4,12 @@ import time
 import numpy as np
 
 # pylint: disable=import-error
-from ..functional import cumulative_average, scalar_square_add_gauss
+# from ..functional import cumulative_average, scalar_square_add_gauss
 
 LOG = logging.getLogger(__name__)
 
 
+# > Pif High Resolution
 class PifHr(object):
     v_threshold = 0.1
 
@@ -80,62 +81,62 @@ class PifHr(object):
         return self
 
 
-# def clip(v, minv, maxv):
-#     return max(minv, min(maxv, v))
-#
-#
-# def approx_exp(x):  # TOCHECK: compare w/ paper equation (3)?
-#     if x > 2.0 or x < -2.0:
-#         return 0.0
-#     x = 1.0 + x / 8.0  #
-#     x *= x
-#     x *= x
-#     x *= x
-#     return x
-#
-#
-# def scalar_square_add_gauss(field, x, y, sigma, v, truncate=2.0):
-#     for i in range(x.shape[0]):  # > #pos
-#         csigma = sigma[i]  # scale, max=2.0
-#         csigma2 = csigma * csigma  # variance
-#         cx = x[i]
-#         cy = y[i]
-#         cv = v[i]
-#
-#         minx = np.array((clip(cx - truncate * csigma, 0, field.shape[1] - 1)), dtype=np.intp)
-#         maxx = np.array((clip(cx + truncate * csigma, minx + 1, field.shape[1])), dtype=np.intp)
-#         miny = np.array((clip(cy - truncate * csigma, 0, field.shape[0] - 1)), dtype=np.intp)
-#         maxy = np.array((clip(cy + truncate * csigma, miny + 1, field.shape[0])), dtype=np.intp)
-#         for xx in range(minx, maxx):
-#             deltax2 = (xx - cx)**2  # l2 norm
-#             for yy in range(miny, maxy):
-#                 deltay2 = (yy - cy)**2 # l2 norm
-#                 vv = cv * approx_exp(-0.5 * (deltax2 + deltay2) / csigma2)  # TOCHECK: equation (3), a2 not used?
-#                 field[yy, xx] += vv
-#
-#
-# def cumulative_average(cuma, cumw, x, y, width, v, w):
-#     for i in range(x.shape[0]):  # > #pos
-#         cw = w[i]  # v
-#         if cw <= 0.0:
-#             continue
-#
-#         cv = v[i]  # scale
-#         cx = x[i]
-#         cy = y[i]
-#         cwidth = width[i]  # scale
-#
-#         minx = np.array((clip(cx - cwidth, 0, cuma.shape[1] - 1)), dtype=np.intp)
-#         maxx = np.array((clip(cx + cwidth, minx + 1, cuma.shape[1])), dtype=np.intp)
-#         miny = np.array((clip(cy - cwidth, 0, cuma.shape[0] - 1)), dtype=np.intp)
-#         maxy = np.array((clip(cy + cwidth, miny + 1, cuma.shape[0])), dtype=np.intp)
-#         for xx in range(minx, maxx):
-#             for yy in range(miny, maxy):
-#                 # TOCHECK: (v * scale + scales[yy,xx] * scales_n[yy,xx]) / (scales[yy,xx] + v)
-#                 cumw_yx = cumw[yy, xx]
-#                 cuma_yx = cuma[yy, xx]
-#                 cumwa_yx = cumw_yx * cuma_yx
-#                 cwv = cw * cv
-#                 cuma[yy, xx] = (cw * cv + cumw[yy, xx] * cuma[yy, xx]) / (cumw[yy, xx] + cw)
-#                 # TOCHECK:
-#                 cumw[yy, xx] += cw
+def clip(v, minv, maxv):
+    return max(minv, min(maxv, v))
+
+
+def approx_exp(x):  # TOCHECK: compare w/ paper equation (3)?
+    if x > 2.0 or x < -2.0:
+        return 0.0
+    x = 1.0 + x / 8.0  #
+    x *= x
+    x *= x
+    x *= x
+    return x
+
+
+def scalar_square_add_gauss(field, x, y, sigma, v, truncate=2.0):
+    for i in range(x.shape[0]):  # > #pos
+        csigma = sigma[i]  # scale, max=2.0
+        csigma2 = csigma * csigma  # variance
+        cx = x[i]
+        cy = y[i]
+        cv = v[i]
+
+        minx = np.array((clip(cx - truncate * csigma, 0, field.shape[1] - 1)), dtype=np.intp)
+        maxx = np.array((clip(cx + truncate * csigma, minx + 1, field.shape[1])), dtype=np.intp)
+        miny = np.array((clip(cy - truncate * csigma, 0, field.shape[0] - 1)), dtype=np.intp)
+        maxy = np.array((clip(cy + truncate * csigma, miny + 1, field.shape[0])), dtype=np.intp)
+        for xx in range(minx, maxx):
+            deltax2 = (xx - cx)**2  # l2 norm
+            for yy in range(miny, maxy):
+                deltay2 = (yy - cy)**2 # l2 norm
+                vv = cv * approx_exp(-0.5 * (deltax2 + deltay2) / csigma2)
+                field[yy, xx] += vv
+
+
+def cumulative_average(cuma, cumw, x, y, width, v, w):
+    for i in range(x.shape[0]):  # > #pos
+        cw = w[i]  # v
+        if cw <= 0.0:
+            continue
+
+        cv = v[i]  # scale
+        cx = x[i]
+        cy = y[i]
+        cwidth = width[i]  # scale
+
+        minx = np.array((clip(cx - cwidth, 0, cuma.shape[1] - 1)), dtype=np.intp)
+        maxx = np.array((clip(cx + cwidth, minx + 1, cuma.shape[1])), dtype=np.intp)
+        miny = np.array((clip(cy - cwidth, 0, cuma.shape[0] - 1)), dtype=np.intp)
+        maxy = np.array((clip(cy + cwidth, miny + 1, cuma.shape[0])), dtype=np.intp)
+        for xx in range(minx, maxx):
+            for yy in range(miny, maxy):
+                # TOCHECK: (v * scale + scales[yy,xx] * scales_n[yy,xx]) / (scales[yy,xx] + v)
+                cumw_yx = cumw[yy, xx]
+                cuma_yx = cuma[yy, xx]
+                cumwa_yx = cumw_yx * cuma_yx
+                cwv = cw * cv
+                cuma[yy, xx] = (cw * cv + cumw[yy, xx] * cuma[yy, xx]) / (cumw[yy, xx] + cw)
+                # TOCHECK:
+                cumw[yy, xx] += cw

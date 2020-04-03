@@ -74,6 +74,7 @@ cdef inline float clip(float v, float minv, float maxv) nogil:
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
+# > Equation (1)
 cpdef void scalar_square_add_gauss(float[:, :] field, float[:] x, float[:] y, float[:] sigma, float[:] v, float truncate=2.0) nogil:
     cdef Py_ssize_t i, xx, yy
     cdef float vv, deltax2, deltay2
@@ -83,9 +84,9 @@ cpdef void scalar_square_add_gauss(float[:, :] field, float[:] x, float[:] y, fl
     for i in prange(x.shape[0]):  # > #pos
         csigma = sigma[i]  # scale, max=2.0
         csigma2 = csigma * csigma  # variance
-        cx = x[i]
-        cy = y[i]
-        cv = v[i]
+        cx = x[i]  # offset x
+        cy = y[i]  # offset y
+        cv = v[i]  # confidence
 
         minx = (<long>clip(cx - truncate * csigma, 0, field.shape[1] - 1))
         maxx = (<long>clip(cx + truncate * csigma, minx + 1, field.shape[1]))
@@ -244,7 +245,7 @@ def paf_center_b(float[:, :] paf_field, float x, float y, float sigma=1.0):
     cdef unsigned int result_i = 0
     cdef bint take
 
-    for i in range(paf_field.shape[1]):
+    for i in range(paf_field.shape[1]):  # > #pos
         take = (
             paf_field[1, i] > x - sigma * paf_field[3, i] and
             paf_field[1, i] < x + sigma * paf_field[3, i] and

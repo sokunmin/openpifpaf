@@ -85,10 +85,11 @@ class PifGenerator(object):
         scales = np.zeros(targets.shape)
         ns = np.zeros(targets.shape)
         for t, p, scale, n in zip(targets, self.pif, scales, ns):
-            v, x, y, s = p[:, p[0] > v_th]
+            v, x, y, s = p[:, p[0] > v_th]  # v: confidence
             x = x * self.stride
             y = y * self.stride
             s = s * self.stride
+            # > to produce high resolution confidence map
             scalar_square_add_gauss(t, x, y, s, v / self.pif_nn, truncate=0.5)
             scalar_square_add_constant(scale, x, y, s, s*v)
             scalar_square_add_constant(n, x, y, s, v)
@@ -140,6 +141,7 @@ class PifGenerator(object):
 
         seeds = list(sorted(seeds, reverse=True))
         if len(seeds) > 500:
+            # > maximum candidates: 500, `conf_th` must be > 0.1
             if seeds[500][0] > 0.1:
                 seeds = [s for s in seeds if s[0] > 0.1]
             else:
